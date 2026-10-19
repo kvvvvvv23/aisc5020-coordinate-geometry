@@ -1,0 +1,241 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=23mm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,graphicx,float}
+\usepackage[hidelinks]{hyperref}
+\usepackage[expansion=false]{microtype}
+\setlength{\parskip}{4pt}
+\graphicspath{{../outputs/part4/}{../outputs/part4/figures/}}
+\title{Diagonal Preconditioning and Paired Statistical Analysis\\
+\large AISC5020 Coordinate Geometry Project -- Module 4}
+\author{HUANG Ze}
+\date{19 October 2026}
+\begin{document}
+\maketitle
+\begin{abstract}
+We derive the effective spectrum of fixed diagonal preconditioning for rotated
+positive-definite quadratic objectives and verify the result numerically.
+We then analyze the group's saved historical main-study data: 10,200 evaluation
+runs and 6,600 pairs covering five methods, two learning-rate selection regimes,
+and separate spectral-information references. All evaluation runs attained the
+target at least once, but standard Adam retained it in only 1,572 of 1,700 runs.
+We distinguish historical attainment from final retention, quantify paired
+fixed-budget effects, and use structure-preserving bootstrap intervals.
+All statements about measured performance refer to the supplied historical
+execution, not a newly rerun main experiment. Independent artifact checks pass,
+while the recorded sampled numerical replays do not fully reproduce the
+historical trajectories.
+\end{abstract}
+
+\section{Scope and relation to the other modules}
+Module 1 provides GD and heavy-ball spectral baselines; Module 2 provides
+standard Adam and matched-history diagnostics; Module 3 supplies shared
+generation, tuning and evaluation; Module 5 provides common-eigenbasis Adam
+and report integration. This module owns planned result P5, diagonal-GD
+validation and statistical summaries. Planned result P4 belongs to Module 5.
+The original contribution by HUANG Ze is
+\href{https://github.com/acbldppx/aisc5020-part4-huangze/tree/1d9b405e0626e2c9b24a2fcd165025f2e68b97df}{\texttt{acbldppx/aisc5020-part4-huangze}, commit \texttt{1d9b405}}.
+The team imported a privacy-sanitized file snapshot with review fixes, retaining
+authorship without merging the upstream Git history. The contribution's team
+source baseline was \texttt{bb365b9}; the historical evaluation manifest identifies
+\texttt{575ebf4}. These identities are distinct from the later team integration.
+We do not reinterpret module-specific replay or proof-verification experiments
+as additional independent main-study samples.
+
+\section{P5: exact diagonal preconditioning}
+Let
+\[
+ H=\begin{pmatrix}a&c\\c&b\end{pmatrix}\succ0,\quad
+ P=\operatorname{diag}(a,b)^{-1},\quad r=\frac{|c|}{\sqrt{ab}}.
+\]
+Positive definiteness gives $a,b>0$ and $ab-c^2>0$, hence $0\le r<1$.
+The symmetric effective Hessian is
+\[
+ S=P^{1/2}HP^{1/2}=
+ \begin{pmatrix}1&c/\sqrt{ab}\\c/\sqrt{ab}&1\end{pmatrix}.
+\]
+Its eigenvalues are $1-r$ and $1+r$, so
+\begin{equation}
+ \kappa_{\mathrm{eff}}=\frac{1+r}{1-r}. \label{eq:p5}
+\end{equation}
+The relevant quantity is the spectral condition number of $S$, not the
+singular-value condition number of the generally nonsymmetric matrix $PH$.
+For $H=Q_\theta\operatorname{diag}(\mu,L)Q_\theta^T$,
+\[
+ a=\mu\cos^2\theta+L\sin^2\theta,\quad
+ b=\mu\sin^2\theta+L\cos^2\theta,\quad
+ c=(\mu-L)\sin\theta\cos\theta.
+\]
+At $0^\circ$ and $90^\circ$, $r=0$ and $\kappa_{\mathrm{eff}}=1$;
+at $45^\circ$, $r=(L-\mu)/(L+\mu)$ and $\kappa_{\mathrm{eff}}=L/\mu$.
+Thus fixed eigenvalues permit complete removal of anisotropy or no improvement.
+
+For $w_{t+1}=w_t-\eta PHw_t$, use $y=P^{-1/2}w$ to obtain
+$y_{t+1}=(I-\eta S)y_t$. The stable interval for all initial points is
+$0<\eta<2/(1+r)$. The minimax constant step is $\eta_*=1$,
+with worst-direction contraction $r$ in the Euclidean norm of $y$, equivalently
+the $P^{-1}$-norm of $w$, and objective bound
+$f(w_t)/f(w_0)\le r^{2t}$. This is an explicit-Hessian, fixed-preconditioner
+comparison, not Adam's time-varying normalization and not a practical oracle-free claim.
+
+\section{Independent numerical validation}
+We sweep all integer angles from $0^\circ$ to $90^\circ$ at
+$\kappa\in\{10,100,1000,10000\}$. All 364 comparisons of
+Eq.~\eqref{eq:p5} with a symmetric eigensolver pass; maximum relative error is
+$8.32\times10^{-13}$. Endpoints and the transformed exact recurrence are tested.
+An additional 56 runs use seven angles, four spectra, and GD/diagonal GD,
+each with 2,000 gradient calls. The same canonical direction is used across
+angles within a spectrum. Diagonal GD uses $\eta=1$; GD uses its theoretical
+spectral step. These one-direction checks are analytical references, not equal-budget
+tuned estimates or additional held-out replicates. Axis-aligned diagonal GD solves
+the quadratic in one update up to roundoff, whereas a $45^\circ$ rotation removes
+its condition-number advantage.
+\begin{figure}[H]\centering
+\includegraphics[width=.86\linewidth]{effective_condition.png}
+\caption{P5 prediction (lines) and measured effective condition numbers (dots).
+The original Hessian spectrum is unchanged within each curve.}
+\end{figure}
+
+\section{Data audit and statistical protocol}
+The saved main protocol contains 5,760 pilot, 52,000 tuning and 10,200 evaluation
+runs. Evaluation uses 50,000 gradient calls with checkpoints at 1,000 and 10,000;
+selection uses 16 candidate rates and a 5,000-call tuning horizon. Transfer and
+orientation-specific retuning are analyzed separately. GD/heavy-ball spectral
+references form a separate \texttt{theory} regime, not extra equal-budget tuned runs.
+The two-dimensional study has ten held-out directions at each spectrum,
+and the $p=20$ study has ten held-out rotations with five paired directions each.
+Condition number one is retained as an isotropic control.
+
+Runs are joined by explicit reference IDs, with matching algorithm, regime,
+spectrum and initialization seed. All 6,600 references resolve uniquely.
+All saved fixed-budget paired effects exactly match independent recomputation
+from the evaluation CSV in this environment. Integration review matched the
+contributor's original archive SHA256 to its Release asset digest; a newly
+assembled team archive has its own identity. Historical raw results and
+metadata remain unchanged.
+
+For a checkpoint $B$, define
+\[
+ r_B=f(w_B)/f(w_0),\qquad
+ \Delta_B=\log_{10}\max(r_{B,Q},10^{-16})-
+           \log_{10}\max(r_{B,I},10^{-16}).
+\]
+Positive effects mean a larger rotated objective gap, not a universal ranking
+between methods. Both observations must be finite at $B$; a last finite iterate
+from an earlier failure is never substituted. We report medians, quartiles,
+missing counts and pointwise descriptive percentile 95\% intervals from 2,000
+bootstrap draws (seed 502004). Two-dimensional directions are jointly resampled
+across all angles. Higher-dimensional resampling selects rotation clusters and
+retains all initialization pairs in a selected cluster. Draws are shared across
+methods/regimes for a spectrum; reused references are not counted as new
+independent observations. There are only ten independent resampling units per
+cell. Intervals are not simultaneous bands or multiplicity-adjusted tests.
+
+Historical success means first attainment $T=\min\{t:r_t\le10^{-6}\}$ exists;
+final retention means the completed run still satisfies the target at the final
+checkpoint. Both definitions have complete four-way paired tables. Attainment
+ratios $T_Q/T_I$ use only pairs with both first times available, and disclose that
+subset size. Missing times are not filled with the budget. Failed or unexecuted
+runs remain in denominators. Fixed-budget log-gap summaries use all available
+finite observations and disclose exclusions; empty bootstrap draws are omitted
+only when a requested metric is undefined for every selected unit.
+
+\section{Results on the saved historical execution}
+\subsection{Attainment, retention and failures}
+All 10,200 evaluation runs are marked \texttt{finite\_cap}: they used the full
+budget rather than stopping at first attainment. All attained the target at least
+once. This status does not mean the target is retained. Standard Adam retains
+the target in 777/850 transfer runs (91.41\%) and 795/850 retuned runs (93.53\%);
+the pooled count is 1,572/1,700 (92.47\%). All other saved methods retain the
+target in every evaluation run. These pooled percentages are descriptive,
+not independent-binomial inference across the heterogeneous design.
+\input{part4_generated_tables.tex}
+\begin{figure}[H]\centering
+\includegraphics[width=\linewidth]{success_retention.png}
+\caption{Unique-run summaries, including reference and rotated runs.
+First attainment alone hides final Adam retention losses.}
+\end{figure}
+All 1,261 recorded explosive failures occur in pilot or tuning
+(66 and 1,195, respectively), in diagonal-GD candidate runs. There are no
+explosive, nonfinite or tuning-failure-placeholder evaluation runs in this
+historical dataset. This does not justify removing failed search candidates,
+nor does it show that every untested learning rate is stable.
+The historical paired table contains 6,600 ``both attained'' outcomes; the final-retained
+table is nontrivial and is supplied separately. Repeated references in those tables
+are matched controls, not new independent observations.
+
+\subsection{Orientation effects depend on budget and tuning}
+At $p=20$, $\kappa=10^4$, standard Adam's transfer median $\Delta_{1000}$ is
+12.17 (descriptive 95\% interval [12.05,12.28]); after retuning it is
+$-2.08$ ([$-2.49$,$-1.90$]). At 50,000 calls the respective medians are
+0.29 ([$-0.21$,1.14]) and 2.96 ([1.52,3.87]). The sign and size depend on
+the checkpoint and selection regime. These values do not establish a persistent
+orientation ordering, a convergence rate, or significance after broad exploration.
+The $10^{-16}$ floor limits apparent precision when both gaps are very small.
+\begin{figure}[H]\centering
+\includegraphics[width=\linewidth]{p20_effect_B1000.png}
+\caption{Early paired effects for all spectra and algorithms. The intervals
+resample ten rotations, preserving their five paired initializations.}
+\end{figure}
+\begin{figure}[H]\centering
+\includegraphics[width=\linewidth]{p20_effect_B50000.png}
+\caption{Late paired effects on the same historical observations. Numerical
+sensitivity and post-attainment oscillations limit mechanism interpretations.}
+\end{figure}
+
+Common-eigenbasis Adam has approximately zero early transfer effects in
+the highlighted spectra, as expected under common parameters. Late nonzero
+effects do not disprove exact-arithmetic correspondence. Roundoff can amplify
+after long trajectories. Retuning may choose different scalar rates for a pair,
+so correspondence need not apply to that pair even in exact arithmetic.
+For diagonal GD at $p=20$, $\kappa=10^4$, the late median effects are 4.34
+(transfer) and 4.03 (retuning). The exact P5 identity concerns two dimensions;
+the higher-dimensional empirical values are not consequences of its closed form.
+\begin{figure}[H]\centering
+\includegraphics[width=\linewidth]{planar_gap_transfer_B1000.png}
+\caption{Two-dimensional map of log relative objective gaps at fixed budget. All five methods and all
+spectra are retained; $\kappa=1$ is a control. Further checkpoints, retuning maps,
+angle curves and full CSV tables accompany this report.}
+\end{figure}
+
+\section{Reproducibility, costs and limitations}
+The contributor's archived independent verification checks complete saved plans,
+selections, CSV fields and pairing before numerical sampling. Its structure
+checks pass. With ten reruns per phase (30 total), two eigenbasis-Adam runs exceed
+$\mathrm{rtol}=10^{-8}$, $\mathrm{atol}=10^{-12}$ on nine compared fields.
+Therefore \textbf{the contributor's numerical replay does not fully pass}.
+The prior integration audit separately reports 56 mismatched runs among 450
+sampled reruns; that is a separate check, not the contributor's 30-run sample. Neither
+number denotes the count of divergent evaluation runs. The saved historical
+\texttt{verification.json} is preserved, not promoted to a current all-clear.
+The cause of every historical numerical discrepancy is not established here.
+New unit tests and deterministic statistical recomputation passing do not resolve
+the long-horizon optimizer replay mismatch.
+
+The experiment exposes the full Hessian. Diagonal extraction requires $O(p)$
+work/storage and elementwise preconditioning $O(p)$ per step, beyond a dense
+$O(p^2)$ gradient. The inherited runner extracts the diagonal inside its update;
+its zero reported setup time is not evidence of zero setup cost. Multiworker
+historical run times include CPU contention and are not controlled speed
+benchmarks. Dedicated setup-inclusive timing was a secondary extension in the
+Proposal and is not claimed as completed here. No runtime ranking is inferred.
+
+This report concerns deterministic quadratics, a small number of independent
+directions/rotations, a finite candidate grid and unequal tuning/evaluation horizons.
+Late Adam observations are numerically sensitive. Bootstrap intervals describe
+the stored observations conditional on that execution; they do not incorporate
+platform uncertainty. Any stronger numerical-reproducibility claim requires a
+new frozen, explicitly identified execution or a resolved explanation agreed by
+the group, not silent replacement of selected historical rows.
+
+\section{Conclusion and integration handoff}
+P5 exactly explains why a fixed diagonal preconditioner can remove or retain
+anisotropy depending on orientation. The saved full-group experiment supports
+paired descriptive analysis, provided first attainment and final retention are
+kept separate and numerical replay limitations remain visible. Module 4 delivers
+reproducible statistics, all raw-source identities, tests, plots and this report.
+The report is a module contribution, not a replacement for the group's complete
+final report. The integrator should merge the method/result paragraphs and
+selected figures, preserve caveats and request an independent teammate review.
+\end{document}

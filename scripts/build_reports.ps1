@@ -10,15 +10,19 @@ $env:TMPDIR = $tempPath
 if (-not (Get-Command pdflatex -ErrorAction SilentlyContinue)) {
     throw "Install a TeX distribution providing pdflatex, such as MiKTeX or TeX Live."
 }
-foreach ($partNumber in @(1, 2, 3, 5)) {
-    $sourcePath = "docs/part${partNumber}_report.tex"
+foreach ($partNumber in @(1, 2, 3, 4, 5)) {
+    $sourcePath = "part${partNumber}_report.tex"
+    $outputPath = Join-Path $projectRoot "outputs/reports"
+    Push-Location -LiteralPath (Join-Path $projectRoot "docs")
+    try {
     foreach ($passNumber in @(1, 2)) {
         $passLogPath = Join-Path $logPath "part${partNumber}_pass${passNumber}.txt"
-        & pdflatex -interaction=nonstopmode -halt-on-error -file-line-error -output-directory=outputs/reports $sourcePath *> $passLogPath
+        & pdflatex -interaction=nonstopmode -halt-on-error -file-line-error "-output-directory=$outputPath" $sourcePath *> $passLogPath
         if ($LASTEXITCODE -ne 0) {
             throw "Module $partNumber report compilation failed; see $passLogPath"
         }
     }
+    } finally { Pop-Location }
     $buildLogPath = "outputs/reports/part${partNumber}_report.log"
     $unresolved = Select-String -Path $buildLogPath -Pattern 'undefined|Rerun to get|Overfull \\[hv]box|LaTeX Error'
     if ($unresolved) {

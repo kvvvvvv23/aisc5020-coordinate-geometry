@@ -6,7 +6,7 @@
 
 AISC5020 小组项目：在固定 Hessian 特征值的条件下，研究坐标旋转如何影响 GD、heavy-ball momentum、Adam 和预条件方法。
 
-这个仓库已接入第 1、2、3、5 部分：统一的问题与运行接口、GD / heavy-ball 理论验证、Adam 坐标依赖诊断、调参与批量实验框架，以及特征坐标 Adam 独立验证。第 3 部分已发布按现有协议运行的一版完整实验数据；全组最终结论仍需组内确认协议，并由第 4 部分对接统计分析。模块 smoke 和结构验证不能替代主实验。
+这个仓库已接入全部五个部分：统一的问题与运行接口、GD / heavy-ball 理论验证、Adam 坐标依赖诊断、调参与批量实验框架、对角预条件与配对统计，以及特征坐标 Adam 独立验证。第 4 部分分析第 3 部分保存的完整实验数据，并保留历史数值复跑的限制；全组最终结论仍需组内确认。模块 smoke 和结构验证不能替代主实验。
 
 ## 分工
 
@@ -48,9 +48,9 @@ macOS / Linux 可以运行 `python -m venv work/.venv`，再执行 `work/.venv/b
 .\scripts\verify_all.ps1 -NoPlots
 ```
 
-该命令运行全部测试、公共 smoke、第 1、2、5 部分的默认实验，以及第 3 部分的小预算端到端实验和完整性核验。它不启动第 3 部分耗时较长的主实验。需要同时生成图表时，先安装 `.\work\.venv\Scripts\python.exe -m pip install -e '.[plots]'`，然后去掉 `-NoPlots`。GitHub Actions 在 Python 3.10 和 3.12 上执行相同的数值检查。报告的 `.tex` 源文件保留在 `docs/`；编译 PDF 和中间文件放在 `outputs/` 或 `work/`。
+该命令运行全部测试、公共 smoke、第 1、2、5 部分的默认实验、第 4 部分的独立预条件验证，以及第 3 部分的小预算端到端实验和完整性核验。它不启动第 3 部分耗时较长的主实验，也不下载正式统计所需的历史数据。需要同时生成图表时，先安装 `.\work\.venv\Scripts\python.exe -m pip install -e '.[plots]'`，然后去掉 `-NoPlots`。GitHub Actions 在 Python 3.10 和 3.12 上执行相同的数值检查。报告的 `.tex` 源文件保留在 `docs/`；编译 PDF 和中间文件放在 `outputs/` 或 `work/`。
 
-安装提供 `pdflatex` 的 MiKTeX 或 TeX Live 后，可运行 `.\scripts\build_reports.ps1`，双次编译第 1、2、3、5 部分报告到 `outputs/reports/`；脚本会检查未解析引用及内容溢出。
+安装提供 `pdflatex` 的 MiKTeX 或 TeX Live，并先生成第 4 部分图表后，可运行 `.\scripts\build_reports.ps1`，双次编译全部五部分报告到 `outputs/reports/`；脚本会检查未解析引用及内容溢出。
 
 ## 第 2 部分：Adam 坐标依赖诊断
 
@@ -213,3 +213,22 @@ python -m coordinate_geometry.verify_part3 --output outputs/part3
 结果写入 `outputs/part3/`：`raw/` 保存每次运行的完整记录（JSONL），`tables/` 提供给第 4 部分的整洁表格（`evaluation_runs.csv`、`pairs.csv`、`evaluation_traces.csv`、`failures.jsonl`、`selected_rates.csv`、`tuning_scores.csv`、`status_summary.csv`），另有 `execution_origin.json`、`frozen_protocol.json`、`budget_summary.json` 与 `manifest.json`。pilot、调参与评估使用互不重叠的 seed 流。来源指纹、研究定义或预算不兼容时会拒绝续跑及重新生成报告，需使用新目录；失败的校验不会覆盖旧来源。旧版无来源文件的实验可独立核验，但不会被自动补记成新实现的结果。
 
 本次修复及验证的实际范围见 [审计记录](docs/part3_validation_2026-10-19.json)。当前默认联检通过；原 Release 数据的完整性与表格核验通过，但在当前 Windows 环境复跑的 450 个历史样本中，56 个 Adam / 特征坐标 Adam 运行超出数值容差，不能标记为完整的跨平台数值复现通过。原数据及来源保持不变，具体限制见第三部分指南与报告。
+
+## 第 4 部分：对角预条件与配对统计
+
+推导、统计定义及局限见 [中文交接指南](docs/part4_guide.md) 和 [英文报告源文件](docs/part4_report.tex)。[整合版 Release](https://github.com/kvvvvvv23/aisc5020-coordinate-geometry/releases/tag/part4-integrated-v1) 提供去除学号及原始课程附件的报告与复现包；包内保留完整历史输入及其来源，没有导入原贡献仓库的提交历史。
+
+仅验证对角预条件的理论与数值结果：
+
+```text
+python -m coordinate_geometry.part4_experiments --output outputs/part4 --no-plots
+```
+
+正式统计需要完整的 `outputs/part3` 历史数据（Release 复现包已包含），不能用 `part3_smoke` 替代。安装绘图依赖后执行：
+
+```text
+python -m pip install -e ".[plots]"
+python scripts/reproduce_part4.py --report
+```
+
+该命令检查全部测试，重新生成独立预条件验证、配对统计、图表与 LaTeX 表格；`--report` 还需要 `pdflatex`，报告写入 `outputs/part4/pdf/`。不加该选项也可完成数值统计。`--config path/to/config.json` 可选择配置；`statistics_output` 同时传给统计、作图和表格步骤，避免读取旧目录。完整流程不重新执行第 3 部分的长时优化器轨迹，也不表示历史数值差异已解决。

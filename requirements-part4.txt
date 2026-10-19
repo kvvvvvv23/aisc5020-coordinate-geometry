@@ -1,0 +1,4 @@
+# Exact versions used for the Part 4 analysis; Python 3.12.14.
+# These are NOT the historical Part 3 execution environment.
+numpy==2.3.5
+matplotlib==3.10.8
