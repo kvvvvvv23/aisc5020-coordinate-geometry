@@ -10,7 +10,7 @@ $env:TMPDIR = $tempPath
 if (-not (Get-Command pdflatex -ErrorAction SilentlyContinue)) {
     throw "Install a TeX distribution providing pdflatex, such as MiKTeX or TeX Live."
 }
-foreach ($partNumber in @(1, 2, 5)) {
+foreach ($partNumber in @(1, 2, 3, 5)) {
     $sourcePath = "docs/part${partNumber}_report.tex"
     foreach ($passNumber in @(1, 2)) {
         $passLogPath = Join-Path $logPath "part${partNumber}_pass${passNumber}.txt"

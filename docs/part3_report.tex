@@ -1,0 +1,411 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[margin=25mm]{geometry}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs,array}
+\usepackage[hidelinks]{hyperref}
+\usepackage{microtype}
+\setlength{\parskip}{0.2em}
+\setlength{\parindent}{1.2em}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\norm}[1]{\left\lVert#1\right\rVert}
+\newcommand{\code}[1]{\texttt{#1}}
+\title{Experimental Design, Learning-Rate Selection and Batch Execution\\[0.35em]
+\large AISC5020: Module 3 Report Sections (Sec.~4 and Sec.~5.1--5.2)}
+\author{CHEN Yuchan}
+\date{19 October 2026 (reviewed revision)}
+\begin{document}
+\maketitle
+\begin{abstract}
+These sections specify how the paired experiments are generated, tuned and
+executed. Every problem, rotation and initial point is rebuilt from its own seed
+key, so pilot, tuning and evaluation instances never overlap and any single run
+can be reproduced in isolation. Learning rates are chosen from sixteen
+log-spaced candidates under two regimes, transfer and per-orientation
+retuning, with gradient-descent and heavy-ball candidates kept strictly inside
+their stability intervals. A pilot fixes the candidate ranges before any
+evaluation run. Fixed-budget accuracy, threshold attainment and three failure
+categories are recorded separately. The historical Release dataset is
+distinguished from subsequent implementation validation. These sections do
+not rank optimizer performance.
+\end{abstract}
+
+\noindent\emph{Integration note.} Section numbers follow the proposal, so
+Sections~\ref{sec:design} and~\ref{sec:tuning} can be pasted into the group
+report. Section~5.3--5.4 (outcome measures and uncertainty) belongs to Module~4;
+the quantities they use are defined here only as far as the run records require.
+Section~\ref{sec:implementation} is supporting material for the appendix.
+
+\setcounter{section}{3}
+\section{Experimental design}\label{sec:design}
+
+\subsection{Problem families and paired instances}
+All problems are the quadratics $f_Q(w)=\tfrac12 w^\top QDQ^\top w$ of
+Section~1 with $L=1$ and $\mu=1/\kappa$, where the eigenvalues are
+\begin{equation}
+  d_i=\kappa^{-(p-i)/(p-1)},\qquad i=1,\dots,p,
+\end{equation}
+so $D=\diag(1/\kappa,1)$ when $p=2$ and the spectrum is log-spaced otherwise.
+We use $\kappa\in\{10,10^2,10^3,10^4\}$ and, as an isotropic control,
+$\kappa=1$ (Section~\ref{sec:controls}).
+
+For each Gaussian direction $u$ we set $z_0=\sqrt{2/(u^\top Du)}\,u$ and
+$w_0=Qz_0$, so $f_I(z_0)=f_Q(w_0)=1$ and $\norm{w_0}=\norm{z_0}$ (eq.~(3)).
+A run on $(Q,w_0)$ is always compared with the run on $(I,z_0)$ that starts from
+the same canonical point; the latter is called its \emph{diagonal reference}.
+Every algorithm uses the same instances.
+
+\paragraph{Two-dimensional study.} For each $\kappa$ we draw ten initial
+directions and share them across the angles
+$\theta\in\{0^\circ,15^\circ,\dots,90^\circ\}$, with $Q=Q_\theta$ from eq.~(25).
+The $0^\circ$ run is the reference for every angle and is executed once; it is
+not counted again for each angle. The $90^\circ$ rotation is a signed
+permutation and serves as a control for which Adam correspondence is exact.
+
+\paragraph{Higher-dimensional study.} For $p=20$ and each $\kappa$ we draw ten
+Haar rotations and, for each rotation, five initial directions. Each of the 50
+rotated runs has its own diagonal reference with the same $z_0$.
+
+\paragraph{Algorithms.} The primary comparison contains gradient descent,
+heavy-ball momentum with $\beta=0.9$, Adam with $(\beta_1,\beta_2,\epsilon)=
+(0.9,0.999,10^{-8})$ and common-eigenbasis Adam with the generator basis; the
+diagonally preconditioned gradient method is a secondary comparison. All
+methods are called through one interface, so each gradient evaluation counts
+as one call and loss bookkeeping is not charged to the budget.
+
+\subsection{Randomization and reproducibility}
+Each random object has a dedicated stream
+\code{SeedSequence(root, key)}, where the key records the stage (pilot, tuning
+or evaluation), the purpose (rotation or initial direction), the study,
+$\kappa$, the tuning regime, the pilot round, the orientation and the index.
+Streams from different stages are therefore disjoint by construction, a fresh
+pilot round uses fresh seeds, and any run can be rebuilt from the key stored in
+its record without replaying the rest of the study. Haar rotations come from
+Gaussian QR factorizations with diagonal-sign correction. All arithmetic is in
+double precision. Each record stores the key of its rotation and initial
+direction, the configuration and a hash of its specification. The reviewed
+execution format additionally records source provenance before running; it
+does not infer old execution provenance from the files present at report time.
+
+\subsection{Controls}\label{sec:controls}
+With $\kappa=1$ the Hessian is the identity for every $Q$, so any difference
+between a rotated run and its reference reflects only the coordinate
+representation of the initial point. The $0^\circ$ and $90^\circ$ angles are
+signed permutations, for which Adam trajectories correspond exactly.
+Gradient descent and heavy ball are rotation-equivariant (Results P1 and P2),
+so under a shared learning rate their paired differences provide an end-to-end
+check of the pairing itself. Selected runs with unit-norm initial points
+($\norm{z_0}=1$) or scaled copies can reuse the same underlying directions,
+but their normalization and scale are part of the study definition. Such
+controls must be specified before freezing a new output directory.
+
+\subsection{Run records and failure categories}\label{sec:records}
+Every evaluation run has a budget of $50{,}000$ gradient calls and records
+\begin{equation}
+  r_B=\frac{f(w_B)}{f(w_0)},\qquad B\in\{10^3,10^4,5\times 10^4\},
+\end{equation}
+together with the first attainment time $T=\min\{t:r_t\le 10^{-6}\}$, checked at
+every step, whether $r_t\le10^{-6}$ still holds at the final step, and the
+largest recorded $r_t$ after $T$. Runs are never stopped at the threshold. A
+run ends in one of four states: \code{finite\_cap} (budget completed),
+\code{explosive} ($r_t>10^{12}$), \code{nonfinite} (an infinite or undefined
+value in the iterate, gradient or optimizer state), or
+\code{not\_run\_tuning\_failure} when every candidate rate failed during
+tuning. Explosive and non-finite runs keep their last finite iterate, the
+failing step and their trace. No run is assigned an artificial attainment time
+and no failed run is removed from a denominator. For each rotated run the
+paired record lists both outcomes, the four-way attainment category, the
+attainment ratio when both runs succeed, and $\Delta_B$ of eq.~(32) at each
+checkpoint where both values are finite. It also states whether the pair
+coincides in exact arithmetic (gradient descent, heavy ball and
+common-eigenbasis Adam under shared settings; Adam and diagonal
+preconditioning only for signed permutations) and the first recorded step at
+which the two traces of $\log_{10} r_t$ differ by more than $10^{-6}$. These
+pairs provide qualitative diagnostics of numerical sensitivity. Their
+distribution is not automatically a calibrated error distribution for methods
+with different learning rates or different adaptive states.
+
+\section{Tuning and evaluation}\label{sec:tuning}
+
+\subsection{Learning-rate selection}
+Every algorithm has sixteen log-spaced candidate rates. A candidate has a
+budget of $5{,}000$ gradient calls from each tuning initialization, without
+threshold-based early stopping, and receives the score
+\begin{equation}
+  S(\eta)=\operatorname{median}\Big[\log_{10}\max\{r_{5000},10^{-16}\}\Big].
+\end{equation}
+A candidate with any explosive or non-finite tuning run receives the worst
+score; a run that only misses $10^{-6}$ within the budget is not a failure.
+The candidate with the smallest score is selected, ties go to the smaller rate,
+and if every candidate fails the cell is recorded as a tuning failure rather
+than given a rate.
+
+Candidate ranges for gradient descent and heavy ball lie strictly inside the
+stability intervals of Section~1: the largest candidate is $0.999$ times the
+upper limit, that is $\eta\le1.998$ for gradient descent and $\eta\le3.7962$ for
+heavy ball with $\beta=0.9$, whose limit is $2(1+\beta)/L=3.8$. The Adam
+variants and the preconditioned method use logarithmic ranges without an
+analytical cap.
+
+\paragraph{Transfer regime.} For each algorithm, dimension and spectrum, one
+rate is selected from four tuning orientations, the diagonal basis and three
+random orientations, with five tuning initializations each. In two dimensions
+the random orientations are angles drawn uniformly from $(0^\circ,90^\circ)$,
+so they generally differ from the evaluation grid. The rate is then fixed for
+every evaluation orientation.
+
+\paragraph{Retuning regime.} For each evaluation orientation, including the
+diagonal reference, a rate is selected from five tuning initializations of that
+same orientation. These initializations come from the tuning stream, so the
+rate is evaluated on fresh initial points.
+
+\paragraph{Spectral references.} Gradient descent with $\eta^\ast=2/(L+\mu)$
+and heavy ball with $(\eta^\ast_{\mathrm{HB}},\beta^\ast_{\mathrm{HB}})$ from
+eqs.~(7) and~(10) are run on the same evaluation instances. They use knowledge
+of $\mu$ and $L$ and are reported separately from the equal-budget comparison.
+
+\paragraph{Horizons.} Rates are selected at $5{,}000$ calls and evaluated at
+$50{,}000$. A rate that is best at the shorter horizon need not be best at the
+longer one; the gradient calls spent on the pilot, on each tuning regime and on
+evaluation are reported separately.
+
+\subsection{Pilot and frozen protocol}
+The pilot uses seeds that are never used again. For every algorithm, study and
+spectrum it runs the full candidate grid on two orientations (including the
+diagonal basis) with three initializations each, and applies the selection
+rule above. If any selected rate is a boundary optimum, the range of that
+algorithm is widened by a factor of ten on that side and the pilot is repeated
+with fresh seeds, at most twice. An upper boundary never moves past
+$0.999$ times a stability limit; an optimum there is reported as capped by
+stability rather than expanded. A boundary that remains after the last round
+is reported as a range limitation. The reviewed format freezes the candidate
+rates and the study definitions, including dimension, spectra, normalization,
+scale, orientation schedule and sample counts. Evaluation budgets and the other
+configuration fields also remain fixed within that output directory. The only
+permitted reduction is to omit entire studies whose remaining definitions are
+unchanged; modifying a study requires a new pilot in a new directory. The
+original historical format did not enforce all of these distribution checks.
+
+The $10^{-16}$ floor can make neighbouring scores equal. Under the default
+smaller-rate tie rule, the pilot counts a selected edge candidate as a boundary
+optimum only when its score is strictly better than that of its neighbour; a tied edge is recorded as a plateau
+and is not expanded. This is an operational pilot rule, not a proof that a
+finite grid locates the global optimum. If the scores actually attain the
+$-16$ floor, no candidate can improve this floored criterion; that statement
+does not extend to unrounded losses or the longer evaluation horizon.
+
+\paragraph{Pilot outcome.} The pilot used 5{,}760 runs ($2.85\times10^{7}$
+gradient calls) on pilot seeds only. Table~\ref{tab:pilot} lists the frozen
+ranges. Gradient descent and heavy ball kept their initial ranges: their optima
+at $\kappa=10^4$ (and at $\kappa=10^3$ for two-dimensional gradient descent)
+lie at the stability-capped upper end. For heavy ball at $\kappa\in\{1,10\}$
+all sixteen candidates reach the floor, which is the plateau case above. Adam
+had a strict upper-boundary optimum in the two-dimensional $\kappa=10^4$ cell,
+so its upper end was raised to $10$; in the second round, with fresh seeds,
+every optimum was interior. Adam and common-eigenbasis Adam therefore use grids
+of different spacing, which must be kept in mind when the two are compared.
+
+\begin{table}[h]
+\centering
+\caption{Candidate ranges after the pilot (sixteen log-spaced rates each).}
+\label{tab:pilot}
+\small
+\begin{tabular}{@{}lllll@{}}
+\toprule
+Method & Initial range & Rounds & Frozen range & Boundary note \\
+\midrule
+Gradient descent & $[0.002,\,1.998]$ & 1 & unchanged & capped by stability \\
+Heavy ball, $\beta=0.9$ & $[0.0038,\,3.7962]$ & 1 & unchanged & capped by stability; plateau \\
+Adam & $[10^{-4},\,1]$ & 2 & $[10^{-4},\,10]$ & upper end expanded once \\
+Eigenbasis Adam & $[10^{-4},\,1]$ & 1 & unchanged & none \\
+Diagonal preconditioning & $[0.002,\,2]$ & 1 & unchanged & none \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Under the tie rule, a floor plateau selects the smallest candidate among
+the tied floored scores. Those candidates have the same recorded tuning score,
+but need not have the same raw loss, first-attainment time or later accuracy.
+The rule does not minimize first-attainment time, so comparisons at small
+$\kappa$ should be read with this in mind. An
+alternative that breaks score ties by the median attainment time is available
+as a configuration option; changing it requires a new pilot.
+
+\section{Implementation and verification}\label{sec:implementation}
+The protocol is implemented in four files. \code{part3\_design} builds the
+spectra, rotations, initial points and run units; \code{part3\_tuning} holds the
+candidate grids, stability limits, scoring and pilot rules;
+\code{part3\_experiments} runs the pilot, tuning, evaluation and reporting
+stages in parallel worker processes and resumes interrupted stages from saved
+records; and \code{verify\_part3} checks the saved outputs with separate code.
+The original verifier rebuilt sampled instances from stored seed keys without
+using the design module and re-executed them through the shared runner. It
+recomputed the selected rates from raw tuning records and checked seed-stage
+isolation, canonical-point pairing and shared transfer rates. The reviewed
+verifier adds completeness and provenance checks; its current verification
+scope is reported separately from the historical main-study numbers below.
+The complete expected run plan, candidate records, selections, pair and CSV
+fields, and budget totals are checked independently of the numerical sample.
+Checkpoint comparisons use explicit tolerances (default relative tolerance
+$10^{-8}$ and absolute tolerance $10^{-12}$), not a cross-platform bitwise
+identity promise. Passing requires both the structural and sampled numerical
+checks, reported separately as \code{structural\_checks\_passed} and
+\code{numerical\_checks\_passed}. A failed writable verification replaces an old passed marker with a
+failed result; \code{--read-only} writes no verification file or manifest.
+
+\paragraph{Execution provenance and safe resumption.} Before a new pilot,
+format version 2 creates \path{execution_origin.json} by exclusive creation.
+It records the initial configuration, source-file hashes normalized from CRLF
+to LF, a source fingerprint and the execution environment. Each new raw record
+carries \code{execution\_source\_sha256}. Subsequent stages check the origin
+instead of replacing it with the current source identity; source changes or
+changed Python/NumPy versions require a fresh directory. The manifest's
+execution identity derives from this origin. A rejected guard does not update
+the stored run configuration or manifest, and preserves the previous
+verification marker. After preflight succeeds, a new execution stage clears
+that marker so a later stage cannot inherit an old passed claim.
+
+An old output directory without this origin is historical evidence, not a
+cache to silently upgrade. The execution stages refuse to append to or
+relabel it; a read-only verifier may inspect it without inventing version-2
+provenance or requiring its historical source to equal the current checkout.
+New report generation validates completeness against the active
+run plan and filters compatible whole-study subsets, rather than exporting
+whatever records happen to exist. The revised budget summary records
+\code{active\_studies} and \code{report\_scope}, making a subset's counts
+explicit rather than mixing in omitted-study caches.
+Resumption removes only an unfinished final
+JSONL fragment without a line ending before appending; malformed complete
+lines or interior records are rejected. A valid last record without a newline
+is retained and separated from the next record.
+Seeds, dimensions and count/budget fields require integers, not Booleans or
+silently truncated fractions. Condition numbers retain the original seed-key
+restriction to finite integer-valued numbers at least one (both $10$ and
+$10.0$ are accepted); this is an implementation namespace restriction, not a
+mathematical restriction on quadratics. Regression checks for these cases complement
+the original generator, selection, spectral-reference and end-to-end tests.
+
+\paragraph{Validation of the reviewed implementation.} The final integrated
+check passed all 89 tests, including 44 Module-3 tests (18 workflow,
+11 provenance/recovery and 15 verifier tests), and all default experiment
+checks. The Module-3 smoke check passed the full structure of its 168 pilot,
+600 tuning and 240 evaluation records, with 60 numerical replays per stage.
+These checks do not rerun the historical main study.
+
+\paragraph{Historical-data replay and its limit.} A separate read-only
+check passed the full structure of the Release dataset: $5{,}760$ pilot,
+$52{,}000$ tuning and $10{,}200$ evaluation records, with $6{,}600$ pairs.
+Its numerical replay sampled 150 runs per stage, 450 in total, and did
+\emph{not} pass at relative tolerance $10^{-8}$ and absolute tolerance
+$10^{-12}$. There were 215 failed field comparisons across 56 runs, not
+215 failed runs: 7 pilot, 11 tuning and 38 evaluation runs. They comprised
+23 Adam and 33 eigenbasis-Adam runs; the other sampled runs passed. One pilot
+first-attainment comparison also failed. The Adam,
+eigenbasis-Adam, runner and problem kernels were unchanged from \code{575ebf4}.
+The 450-run check preceded the final CSV-metadata-only verifier tightening.
+The final checker separately passed the same full structural checks and one
+numerical replay per stage in read-only mode. This three-run numerical check
+does not supersede the failed 450-run check. These are separate checks, not
+one all-passing final-checker command; the
+\href{https://github.com/kvvvvvv23/aisc5020-coordinate-geometry/blob/main/docs/part3_validation_2026-10-19.json}{audit summary (JSON)}
+records their scopes and source identities.
+
+In a controlled single-run rerun, changing only the first component of $w_0$
+by one unit in the last place (perturbation norm $2.78\times10^{-17}$) shifted
+the final relative loss from $9.46\times10^{-5}$ to $1.08\times10^{-7}$ and
+changed final threshold retention; this example's first attainment remained
+at step 122. This supports numerical sensitivity, but
+does not identify the specific cause of the historical discrepancies. The
+released data are therefore not fully reproduced numerically in the current
+environment, even though their structure is verified.
+
+\paragraph{Historical Release execution.} The original
+\href{https://github.com/akaComic/aisc5020-coordinate-geometry/releases/tag/part3-v1}{\code{part3-v1} Release}
+records the run made on 18--19 October 2026 at source commit
+\code{575ebf4}, using Python 3.13.16 and NumPy 2.5.4 on Linux, two workers
+and single-thread BLAS settings. It produced
+$52{,}000$ tuning runs and $10{,}200$ evaluation runs. Every tuning cell
+selected a rate; the 47 boundary optima were all gradient-descent or heavy-ball
+optima at the stability cap. All records that did not end in
+\code{finite\_cap} were large-rate candidates of the diagonal method during
+pilot and tuning; every evaluation run completed its budget and every pair
+attained the threshold. The Release contains a passed verification record with
+150 sampled runs per stage; its reported checks include all 500 selections.
+These are historical results, not a claim that the full main experiment was
+rerun after the review fixes.
+
+A separate read-only review checked the published archive's SHA256 against
+the GitHub asset digest and matched all 19 source-file hashes to the historical
+snapshot (with line endings represented as LF). It independently checked
+the initial-seed and metadata pairing of all $6{,}600$ pairs and recomputed
+their checkpoint $\Delta_B$ values; the largest numerical difference was
+$1.78\times10^{-15}$. This corroborates the released tables and provenance.
+That archive-integrity check did not rerun trajectories; the separate
+450-run numerical replay and its failures are described above.
+
+\paragraph{Observed late-time separation.} First consider only pairs whose
+required settings are shared (the field \path{correspondence_expected} is true).
+In the historical dataset there are $4{,}460$ such pairs. None separates at a
+recorded point before both runs attain $10^{-6}$; the gradient-descent,
+heavy-ball and diagonal-method pairs in this subset do not separate at all.
+This statement does not cover all retuned pairs, since different selected
+learning rates can themselves change the trajectories. Among the expected
+correspondence pairs, $1{,}118$ Adam or common-eigenbasis-Adam pairs separate
+later, with median recorded separation step $17{,}000$. Their late
+$\Delta_B$ can be large even though the idealized trajectories coincide.
+
+Of the $1{,}700$ ordinary-Adam evaluation runs, 678 were observed above
+$10^{-6}$ at a saved point after first attainment, and 128 ended above it.
+The rebound count is based on records spaced $1{,}000$ updates apart; it is
+not a complete count of all between-record threshold crossings. In the
+stored expected-correspondence pairs the first-attainment times are identical and
+the absolute $10^3$-call paired log gap is at most $3\times10^{-10}$.
+These observations describe the saved dataset, not equality across environments.
+
+\paragraph{A conditional local model for the spikes.} A decaying second
+moment can increase the effective update scale, but Adam's first momentum
+must also be retained. To see the distinction from GD, consider a
+one-dimensional quadratic with curvature $\lambda>0$, neglect late-time bias
+corrections, and temporarily freeze
+$c=\sqrt{\bar v}+\epsilon>0$. Write $\gamma=\eta/c$. The resulting linear model is
+\[
+ m_{t+1}=\beta_1m_t+(1-\beta_1)\lambda x_t,\qquad
+ x_{t+1}=x_t-\gamma m_{t+1}.
+\]
+Eliminating the first moment gives
+\begin{equation}
+ x_{t+1}=\bigl[1+\beta_1-\gamma(1-\beta_1)\lambda\bigr]x_t
+          -\beta_1x_{t-1}.
+\end{equation}
+For $0\leq\beta_1<1$, the strict Schur condition for this frozen model is
+\begin{equation}
+ 0<\gamma\lambda<\frac{2(1+\beta_1)}{1-\beta_1}.
+ \label{eq:frozen-adam}
+\end{equation}
+Thus the upper bound is $38$ when $\beta_1=0.9$, rather than the GD value $2$.
+For example, at $\gamma\lambda=3$ the roots are approximately
+$0.8\pm0.509902\,\mathrm{i}$, with modulus $\sqrt{0.9}<1$;
+at $38$ the roots are $-1$ and $-0.9$, so the boundary is not strictly stable.
+The actual denominator is $\sqrt{\hat v_t}+\epsilon$, so its effective scale
+is bounded above by $\eta/\epsilon$ and cannot be assumed to grow without limit.
+
+Equation~\eqref{eq:frozen-adam} is a one-dimensional, frozen-denominator,
+late-time approximation, not a global stability theorem for adaptive Adam.
+When gradient squares contribute little to the second-moment update, its
+decay may help explain a subsequent rise in effective scale. The complete
+adaptive dynamics, changing moments and finite precision still have to be
+considered. A double-precision rerun alone does not prove that the same
+observed spikes occur in exact arithmetic, nor does it establish mathematical
+chaos. The recorded loss traces show late rebound and sensitivity; they do not
+supply such a proof.
+
+Late-checkpoint gaps for the Adam variants can therefore reflect numerical
+sensitivity as well as coordinate or tuning effects. Matched eigenbasis-Adam
+and signed-permutation controls help diagnose that sensitivity, but are not
+an error distribution to subtract from every other method. The observed
+floating-point separation does not contradict Result P4's exact-arithmetic
+common-basis identity.
+
+\end{document}
