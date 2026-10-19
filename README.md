@@ -183,3 +183,31 @@ python -m coordinate_geometry.verify_part5 --output outputs/part5
 ```
 
 结果写入 `outputs/part5/`，包括原始轨迹、配置、对应性 CSV、特征基诊断、计时、汇总、图表和独立复核记录。本模块验证的是共同特征基中的轨迹对应性及其边界，报告基恢复残差、轨迹误差和额外成本；它不是全组调参后的优劣结论。特别是重特征值允许任意子空间换基；极小特征值间隔也会影响浮点恢复，因此不能仅凭“特征值数值上互不相同”或残差小，就宣称恢复轨迹一定一致。
+
+## 第 3 部分：实验框架、调参与批量运行
+
+完整说明见 [第三部分中文指南](docs/part3_guide.md)，英文报告段落（第 4 节与第 5 节调参部分）见 [LaTeX 源文件](docs/part3_report.tex)。本模块只通过统一的 `run(problem, initial, RunConfig)` 调用各模块的优化器，不改动其他模块的算法实现。
+
+先用几秒钟的 smoke 检查整条流程和输出格式（不是 pilot，也不是调参结果）：
+
+```powershell
+.\scripts\part3.ps1                      # 测试 + smoke，输出到 outputs/part3_smoke
+```
+
+主实验按阶段运行，每个阶段都可中断后续跑（已保存的 run 会跳过）：
+
+```powershell
+.\scripts\part3.ps1 -Stage pilot         # pilot：确定并冻结各算法的 16 个候选学习率
+.\scripts\part3.ps1 -Stage tune          # transfer 与 retune 两种调参
+.\scripts\part3.ps1 -Stage evaluate      # 50,000 次梯度调用的评估运行与理论参考
+.\scripts\part3.ps1 -Stage report        # 整理表格并独立复核
+```
+
+跨平台或手动运行：
+
+```text
+python -m coordinate_geometry.part3_experiments --config configs/part3.json --output outputs/part3 --stage all --workers 4 --plot
+python -m coordinate_geometry.verify_part3 --output outputs/part3
+```
+
+结果写入 `outputs/part3/`：`raw/` 保存每次运行的完整记录（JSONL），`tables/` 提供给第 4 部分的整洁表格（`evaluation_runs.csv`、`pairs.csv`、`evaluation_traces.csv`、`failures.jsonl`、`selected_rates.csv`、`tuning_scores.csv`、`status_summary.csv`），另有 `frozen_protocol.json`、`budget_summary.json` 与 `manifest.json`。pilot、调参与评估使用互不重叠的 seed 流；冻结协议之后修改调参相关设置会被拒绝，需在新的输出目录重新 pilot。

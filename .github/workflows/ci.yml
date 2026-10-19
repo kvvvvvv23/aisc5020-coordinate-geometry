@@ -43,3 +43,7 @@ jobs:
         run: |
           python -m coordinate_geometry.part5_experiments --config configs/part5.json --output outputs/part5 --no-plots
           python -m coordinate_geometry.verify_part5 --output outputs/part5
+      - name: Run Module 3 pipeline smoke and verify saved artifacts
+        run: |
+          python -m coordinate_geometry.part3_experiments --config configs/part3_smoke.json --output outputs/part3_smoke --stage all
+          python -m coordinate_geometry.verify_part3 --output outputs/part3_smoke

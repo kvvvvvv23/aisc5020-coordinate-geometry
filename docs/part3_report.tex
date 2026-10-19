@@ -1,0 +1,271 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[margin=25mm]{geometry}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs,array}
+\usepackage[hidelinks]{hyperref}
+\usepackage{microtype}
+\setlength{\parskip}{0.35em}
+\setlength{\parindent}{1.2em}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\norm}[1]{\left\lVert#1\right\rVert}
+\newcommand{\code}[1]{\texttt{#1}}
+\title{Experimental Design, Learning-Rate Selection and Batch Execution\\[0.35em]
+\large AISC5020: Module 3 Report Sections (Sec.~4 and Sec.~5.1--5.2)}
+\author{CHEN Yuchan}
+\date{18 October 2026}
+\begin{document}
+\maketitle
+\begin{abstract}
+These sections specify how the paired experiments are generated, tuned and
+executed. Every problem, rotation and initial point is rebuilt from its own seed
+key, so pilot, tuning and evaluation instances never overlap and any single run
+can be reproduced in isolation. Learning rates are chosen from sixteen
+log-spaced candidates under two regimes, transfer and per-orientation
+retuning, with gradient-descent and heavy-ball candidates kept strictly inside
+their stability intervals. A pilot fixes the candidate ranges before any
+evaluation run. Fixed-budget accuracy, threshold attainment and three failure
+categories are recorded separately. The sections describe the protocol and its
+implementation; they contain no comparison of optimizers.
+\end{abstract}
+
+\noindent\emph{Integration note.} Section numbers follow the proposal, so
+Sections~\ref{sec:design} and~\ref{sec:tuning} can be pasted into the group
+report. Section~5.3--5.4 (outcome measures and uncertainty) belongs to Module~4;
+the quantities they use are defined here only as far as the run records require.
+Section~\ref{sec:implementation} is supporting material for the appendix.
+
+\setcounter{section}{3}
+\section{Experimental design}\label{sec:design}
+
+\subsection{Problem families and paired instances}
+All problems are the quadratics $f_Q(w)=\tfrac12 w^\top QDQ^\top w$ of
+Section~1 with $L=1$ and $\mu=1/\kappa$, where the eigenvalues are
+\begin{equation}
+  d_i=\kappa^{-(p-i)/(p-1)},\qquad i=1,\dots,p,
+\end{equation}
+so $D=\diag(1/\kappa,1)$ when $p=2$ and the spectrum is log-spaced otherwise.
+We use $\kappa\in\{10,10^2,10^3,10^4\}$ and, as an isotropic control,
+$\kappa=1$ (Section~\ref{sec:controls}).
+
+For each Gaussian direction $u$ we set $z_0=\sqrt{2/(u^\top Du)}\,u$ and
+$w_0=Qz_0$, so $f_I(z_0)=f_Q(w_0)=1$ and $\norm{w_0}=\norm{z_0}$ (eq.~(3)).
+A run on $(Q,w_0)$ is always compared with the run on $(I,z_0)$ that starts from
+the same canonical point; the latter is called its \emph{diagonal reference}.
+Every algorithm uses the same instances.
+
+\paragraph{Two-dimensional study.} For each $\kappa$ we draw ten initial
+directions and share them across the angles
+$\theta\in\{0^\circ,15^\circ,\dots,90^\circ\}$, with $Q=Q_\theta$ from eq.~(25).
+The $0^\circ$ run is the reference for every angle and is executed once; it is
+not counted again for each angle. The $90^\circ$ rotation is a signed
+permutation and serves as a control for which Adam correspondence is exact.
+
+\paragraph{Higher-dimensional study.} For $p=20$ and each $\kappa$ we draw ten
+Haar rotations and, for each rotation, five initial directions. Each of the 50
+rotated runs has its own diagonal reference with the same $z_0$.
+
+\paragraph{Algorithms.} The primary comparison contains gradient descent,
+heavy-ball momentum with $\beta=0.9$, Adam with $(\beta_1,\beta_2,\epsilon)=
+(0.9,0.999,10^{-8})$ and common-eigenbasis Adam with the generator basis; the
+diagonally preconditioned gradient method is a secondary comparison. All
+methods are called through one interface, so each gradient evaluation counts
+as one call and loss bookkeeping is not charged to the budget.
+
+\subsection{Randomization and reproducibility}
+Each random object has a dedicated stream
+\code{SeedSequence(root, key)}, where the key records the stage (pilot, tuning
+or evaluation), the purpose (rotation or initial direction), the study,
+$\kappa$, the tuning regime, the pilot round, the orientation and the index.
+Streams from different stages are therefore disjoint by construction, a fresh
+pilot round uses fresh seeds, and any run can be rebuilt from the key stored in
+its record without replaying the rest of the study. Haar rotations come from
+Gaussian QR factorizations with diagonal-sign correction. All arithmetic is in
+double precision. Each record stores the key of its rotation and initial
+direction, the configuration and a hash of its specification; output
+directories cannot mix runs whose specifications differ.
+
+\subsection{Controls}\label{sec:controls}
+With $\kappa=1$ the Hessian is the identity for every $Q$, so any difference
+between a rotated run and its reference reflects only the coordinate
+representation of the initial point. The $0^\circ$ and $90^\circ$ angles are
+signed permutations, for which Adam trajectories correspond exactly.
+Gradient descent and heavy ball are rotation-equivariant (Results P1 and P2),
+so under a shared learning rate their paired differences provide an end-to-end
+check of the pairing itself. Selected runs with unit-norm initial points
+($\norm{z_0}=1$) or scaled copies use the same directions and can be enabled
+in the configuration without changing any other instance.
+
+\subsection{Run records and failure categories}\label{sec:records}
+Every evaluation run uses $50{,}000$ gradient calls and records
+\begin{equation}
+  r_B=\frac{f(w_B)}{f(w_0)},\qquad B\in\{10^3,10^4,5\times 10^4\},
+\end{equation}
+together with the first attainment time $T=\min\{t:r_t\le 10^{-6}\}$, checked at
+every step, whether $r_t\le10^{-6}$ still holds at the final step, and the
+largest recorded $r_t$ after $T$. Runs are never stopped at the threshold. A
+run ends in one of four states: \code{finite\_cap} (budget completed),
+\code{explosive} ($r_t>10^{12}$), \code{nonfinite} (an infinite or undefined
+value in the iterate, gradient or optimizer state), or
+\code{not\_run\_tuning\_failure} when every candidate rate failed during
+tuning. Explosive and non-finite runs keep their last finite iterate, the
+failing step and their trace. No run is assigned an artificial attainment time
+and no failed run is removed from a denominator. For each rotated run the
+paired record lists both outcomes, the four-way attainment category, the
+attainment ratio when both runs succeed, and $\Delta_B$ of eq.~(32) at each
+checkpoint where both values are finite. It also states whether the pair
+coincides in exact arithmetic (gradient descent, heavy ball and
+common-eigenbasis Adam under shared settings; Adam and diagonal
+preconditioning only for signed permutations) and the first recorded step at
+which the two traces of $\log_{10} r_t$ differ by more than $10^{-6}$. These
+pairs give an empirical floor for $\Delta_B$ against which the other pairs
+can be read.
+
+\section{Tuning and evaluation}\label{sec:tuning}
+
+\subsection{Learning-rate selection}
+Every algorithm has sixteen log-spaced candidate rates. A candidate is run from
+each tuning initialization for $5{,}000$ gradient calls, without early
+stopping, and receives the score
+\begin{equation}
+  S(\eta)=\operatorname{median}\Big[\log_{10}\max\{r_{5000},10^{-16}\}\Big].
+\end{equation}
+A candidate with any explosive or non-finite tuning run receives the worst
+score; a run that only misses $10^{-6}$ within the budget is not a failure.
+The candidate with the smallest score is selected, ties go to the smaller rate,
+and if every candidate fails the cell is recorded as a tuning failure rather
+than given a rate.
+
+Candidate ranges for gradient descent and heavy ball lie strictly inside the
+stability intervals of Section~1: the largest candidate is $0.999$ times the
+upper limit, that is $\eta\le1.998$ for gradient descent and $\eta\le3.7962$ for
+heavy ball with $\beta=0.9$, whose limit is $2(1+\beta)/L=3.8$. The Adam
+variants and the preconditioned method use logarithmic ranges without an
+analytical cap.
+
+\paragraph{Transfer regime.} For each algorithm, dimension and spectrum, one
+rate is selected from four tuning orientations, the diagonal basis and three
+random orientations, with five tuning initializations each. In two dimensions
+the random orientations are angles drawn uniformly from $(0^\circ,90^\circ)$,
+so they generally differ from the evaluation grid. The rate is then fixed for
+every evaluation orientation.
+
+\paragraph{Retuning regime.} For each evaluation orientation, including the
+diagonal reference, a rate is selected from five tuning initializations of that
+same orientation. These initializations come from the tuning stream, so the
+rate is evaluated on fresh initial points.
+
+\paragraph{Spectral references.} Gradient descent with $\eta^\ast=2/(L+\mu)$
+and heavy ball with $(\eta^\ast_{\mathrm{HB}},\beta^\ast_{\mathrm{HB}})$ from
+eqs.~(7) and~(10) are run on the same evaluation instances. They use knowledge
+of $\mu$ and $L$ and are reported separately from the equal-budget comparison.
+
+\paragraph{Horizons.} Rates are selected at $5{,}000$ calls and evaluated at
+$50{,}000$. A rate that is best at the shorter horizon need not be best at the
+longer one; the gradient calls spent on the pilot, on each tuning regime and on
+evaluation are reported separately.
+
+\subsection{Pilot and frozen protocol}
+The pilot uses seeds that are never used again. For every algorithm, study and
+spectrum it runs the full candidate grid on two orientations (including the
+diagonal basis) with three initializations each, and applies the selection
+rule above. If any selected rate is a boundary optimum, the range of that
+algorithm is widened by a factor of ten on that side and the pilot is repeated
+with fresh seeds, at most twice. An upper boundary never moves past
+$0.999$ times a stability limit; an optimum there is reported as capped by
+stability rather than expanded. A boundary that remains after the last round
+is reported as a range limitation. All candidate rates are then frozen, and the
+software refuses to tune or evaluate with settings that differ from the frozen
+protocol.
+
+The $10^{-16}$ floor makes the scores of several neighbouring candidates equal
+when the spectrum is well conditioned. We therefore count a selected edge
+candidate as a boundary optimum only when its score is strictly better than
+that of its neighbour. When a tied plateau merely starts at the edge, the set
+of optimal candidates extends into the grid and widening the range cannot
+locate a better rate, so the plateau is recorded but not expanded.
+
+\paragraph{Pilot outcome.} The pilot used 5{,}760 runs ($2.85\times10^{7}$
+gradient calls) on pilot seeds only. Table~\ref{tab:pilot} lists the frozen
+ranges. Gradient descent and heavy ball kept their initial ranges: their optima
+at $\kappa=10^4$ (and at $\kappa=10^3$ for two-dimensional gradient descent)
+lie at the stability-capped upper end. For heavy ball at $\kappa\in\{1,10\}$
+all sixteen candidates reach the floor, which is the plateau case above. Adam
+had a strict upper-boundary optimum in the two-dimensional $\kappa=10^4$ cell,
+so its upper end was raised to $10$; in the second round, with fresh seeds,
+every optimum was interior. Adam and common-eigenbasis Adam therefore use grids
+of different spacing, which must be kept in mind when the two are compared.
+
+\begin{table}[h]
+\centering
+\caption{Candidate ranges after the pilot (sixteen log-spaced rates each).}
+\label{tab:pilot}
+\small
+\begin{tabular}{@{}lllll@{}}
+\toprule
+Method & Initial range & Rounds & Frozen range & Boundary note \\
+\midrule
+Gradient descent & $[0.002,\,1.998]$ & 1 & unchanged & capped by stability \\
+Heavy ball, $\beta=0.9$ & $[0.0038,\,3.7962]$ & 1 & unchanged & capped by stability; plateau \\
+Adam & $[10^{-4},\,1]$ & 2 & $[10^{-4},\,10]$ & upper end expanded once \\
+Eigenbasis Adam & $[10^{-4},\,1]$ & 1 & unchanged & none \\
+Diagonal preconditioning & $[0.002,\,2]$ & 1 & unchanged & none \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Under the tie rule, a floor plateau selects the smallest rate that still
+reaches $10^{-16}$ within $5{,}000$ calls. This does not affect fixed-budget
+accuracy but lengthens first-attainment times in well-conditioned cells, so
+attainment comparisons at small $\kappa$ should be read with this in mind. An
+alternative that breaks score ties by the median attainment time is available
+as a configuration option; changing it requires a new pilot.
+
+\section{Implementation and verification}\label{sec:implementation}
+The protocol is implemented in four files. \code{part3\_design} builds the
+spectra, rotations, initial points and run units; \code{part3\_tuning} holds the
+candidate grids, stability limits, scoring and pilot rules;
+\code{part3\_experiments} runs the pilot, tuning, evaluation and reporting
+stages in parallel worker processes and resumes interrupted stages from saved
+records; and \code{verify\_part3} checks the saved outputs with separate code.
+The verifier rebuilds each sampled instance from its stored seed key without
+using the design module, re-executes the run through the shared runner and
+requires identical status, attainment time and checkpoint values. It also
+recomputes every selected rate from the raw tuning records and checks that the
+seed stages are disjoint, that each pair shares its canonical initial point and
+that transfer pairs share their rate. Unit tests cover the generators, the
+equality of the initial points with the shared \code{matched\_pair} helper, the
+selection and pilot rules, the agreement of the spectral references with
+Module~1, and an end-to-end run including resumption and the frozen-protocol
+check.
+
+\paragraph{Execution of the frozen protocol.} The complete protocol produced
+$52{,}000$ tuning runs and $10{,}200$ evaluation runs. Every tuning cell
+selected a rate; the 47 boundary optima were all gradient-descent or heavy-ball
+optima at the stability cap. All records that did not end in
+\code{finite\_cap} were large-rate candidates of the diagonal method during
+pilot and tuning; every evaluation run completed its budget and every pair
+attained the threshold. The verifier reproduced 150 sampled runs per stage
+exactly and recomputed all 500 selections.
+
+\paragraph{Post-convergence behaviour of Adam.} No pair that coincides in
+exact arithmetic separated before attaining $10^{-6}$, and the gradient,
+heavy-ball and diagonal pairs never separated. Adam and common-eigenbasis Adam
+pairs, however, separate later (median recorded step $17{,}000$). Far below
+the threshold the gradients become negligible relative to the stored second
+moment, $\hat v_t$ decays like $\beta_2^t$, and the effective step
+$\eta/\sqrt{\hat v_t}$ grows until it exceeds $2/\lambda$; the iterate is then
+amplified by many orders of magnitude before $\hat v_t$ recovers, and the cycle
+repeats. These spikes occur in exact arithmetic, but they are nonlinear and
+amplify rounding differences of order $10^{-13}$, so paired runs that should
+coincide decorrelate. Of the 1{,}700 evaluation runs of standard Adam, 678 rose
+above $10^{-6}$ again after first attaining it and 128 ended above it.
+Late-checkpoint values of $\Delta_B$ for the Adam variants therefore combine
+coordinate dependence with this amplification, and the eigenbasis-Adam and
+signed-permutation pairs measure the latter. The first-attainment time and the
+$10^3$-call checkpoint are unaffected. The separation does not contradict
+Result~P4, which concerns exact arithmetic.
+
+\end{document}
