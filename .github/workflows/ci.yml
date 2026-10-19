@@ -39,6 +39,8 @@ jobs:
           python -m coordinate_geometry.verify_part1 --output outputs/part1
       - name: Run Module 2 mechanism diagnostic
         run: python -m coordinate_geometry.adam_diagnostics --config configs/adam_diagnostics.json --output outputs/adam_diagnostics
+      - name: Verify Module 4 preconditioning reference
+        run: python -m coordinate_geometry.part4_experiments --output outputs/part4 --no-plots
       - name: Verify Module 5 trajectories and saved artifacts
         run: |
           python -m coordinate_geometry.part5_experiments --config configs/part5.json --output outputs/part5 --no-plots

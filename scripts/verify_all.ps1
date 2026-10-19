@@ -24,6 +24,13 @@ if (-not $NoPlots) { $part2Arguments += "--plot" }
 & $PythonExecutable @part2Arguments
 if ($LASTEXITCODE -ne 0) { throw "Module 2 diagnostic failed." }
 
+$part4Arguments = @("-m", "coordinate_geometry.part4_experiments", "--output", "outputs/part4")
+if ($NoPlots) { $part4Arguments += "--no-plots" }
+& $PythonExecutable @part4Arguments
+if ($LASTEXITCODE -ne 0) { throw "Module 4 standalone preconditioning check failed." }
+# Formal Module 4 statistics additionally need the historical Module 3 data;
+# run scripts/reproduce_part4.py separately, as documented in the README.
+
 $part5Arguments = @("-m", "coordinate_geometry.part5_experiments", "--config", "configs/part5.json", "--output", "outputs/part5")
 if ($NoPlots) { $part5Arguments += "--no-plots" }
 & $PythonExecutable @part5Arguments

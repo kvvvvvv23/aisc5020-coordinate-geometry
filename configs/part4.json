@@ -1,0 +1,13 @@
+{
+  "owner": "HUANG Ze",
+  "input": "outputs/part3",
+  "statistics_output": "outputs/part4/stats",
+  "bootstrap_repetitions": 2000,
+  "bootstrap_seed": 502004,
+  "loss_floor": 1e-16,
+  "interval": "pointwise descriptive percentile 95 percent",
+  "historical_execution_commit": "575ebf4ce842d8f7996512b7619551fe8332e8a7",
+  "integration_source_commit": "bb365b9ddb6945dae46d47d7c7c536952a943363",
+  "numerical_replay_full_pass_claimed": false,
+  "controlled_timing_benchmark_claimed": false
+}

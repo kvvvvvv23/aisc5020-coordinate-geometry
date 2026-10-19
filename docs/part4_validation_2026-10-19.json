@@ -1,0 +1,213 @@
+{
+  "date": "2026-10-19",
+  "main_base_commit": "bb365b9ddb6945dae46d47d7c7c536952a943363",
+  "contribution_repository": "https://github.com/acbldppx/aisc5020-part4-huangze",
+  "contribution_commit": "1d9b405e0626e2c9b24a2fcd165025f2e68b97df",
+  "imported_sanitized_file_snapshot_without_upstream_git_history": true,
+  "contribution_author": "HUANG Ze",
+  "fixes": [
+    "Propagate configured statistics directory to figures and LaTeX tables",
+    "Validate positive integer first attainment against calls for every unique run; retained implies attained",
+    "Remove student identifiers and original course attachments from team publication"
+  ],
+  "environment": {
+    "python": "3.12.14",
+    "numpy": "2.5.4",
+    "matplotlib": "3.11.2",
+    "platform": "Windows"
+  },
+  "commands": [
+    "scripts/verify_all.ps1 -NoPlots",
+    "python scripts/reproduce_part4.py --report",
+    "scripts/build_reports.ps1"
+  ],
+  "current_tests_passed": 110,
+  "module4_tests_passed": 21,
+  "all_five_default_module_checks_passed": true,
+  "module1": {
+    "status": "passed",
+    "cases": 28,
+    "trajectories": 56,
+    "max_relative_reconstruction_error": 4.0342688650190743e-13,
+    "method": "Independent modal position recurrence; seeded regeneration; loss, gradient, stopping and CSV checks",
+    "source_hashes_checked": 23
+  },
+  "module2": {
+    "diagnostic_rows": 350,
+    "completed": true
+  },
+  "module3_smoke": {
+    "passed": true,
+    "errors": [],
+    "sample_per_stage": 60,
+    "seed": 20261018,
+    "structural_checks_passed": true,
+    "numerical_checks_passed": true,
+    "complete_stage_records": {
+      "pilot": 168,
+      "tuning": 600,
+      "evaluation": 240
+    },
+    "numerical_runs_rechecked": {
+      "pilot": 60,
+      "tuning": 60,
+      "evaluation": 60
+    },
+    "not_run_placeholders": 0,
+    "pairs_checked": 144,
+    "historical_source_identity_preserved": true,
+    "numerical_tolerance": {
+      "rtol": 1e-08,
+      "atol": 1e-12
+    }
+  },
+  "module4_standalone": {
+    "max_relative_condition_error": 8.329152478849421e-13,
+    "condition_checks": 364,
+    "standalone_runs": 56,
+    "steps": 2000,
+    "seed": 20261019,
+    "formal_part3_analysis_completed": false,
+    "notes": "Standalone theoretical reference, one direction per spectrum; no tuned ranking."
+  },
+  "module4_formal_statistics": {
+    "evaluation_runs": 10200,
+    "pairs": 6600,
+    "bootstrap_repetitions": 2000,
+    "bootstrap_seed": 502004,
+    "max_delta_recalculation_error": 1.7763568394002505e-15
+  },
+  "module5": {
+    "passed": true,
+    "case_count": 126,
+    "trajectories_recomputed": 504,
+    "required_correspondence_checks": 250,
+    "timing_rows_checked": 45,
+    "source_hashes_checked": 47,
+    "checks": "Seeded problem schedule and initializations, raw Adam updates at every iterate, losses, CSV/JSON metrics, timing medians, basis residuals, operation counts and normalized-LF source hashes."
+  },
+  "statistical_comparison": {
+    "historical_input_files_unchanged": 28,
+    "statistical_tables_match_original_release_within_1e_12": true,
+    "comparison": [
+      {
+        "file": "failures_by_stage.csv",
+        "rows": 2,
+        "differing_numeric_fields": 0,
+        "maximum_absolute_difference": 0.0
+      },
+      {
+        "file": "paired_effects.csv",
+        "rows": 1680,
+        "differing_numeric_fields": 181,
+        "maximum_absolute_difference": 1.7763568394002505e-15
+      },
+      {
+        "file": "paired_observations.csv",
+        "rows": 6600,
+        "differing_numeric_fields": 369,
+        "maximum_absolute_difference": 1.7763568394002505e-15
+      },
+      {
+        "file": "paired_success.csv",
+        "rows": 840,
+        "differing_numeric_fields": 0,
+        "maximum_absolute_difference": 0.0
+      },
+      {
+        "file": "run_summary.csv",
+        "rows": 1620,
+        "differing_numeric_fields": 50,
+        "maximum_absolute_difference": 1.7763568394002505e-15
+      }
+    ]
+  },
+  "input_files_sha256": {
+    "budget_summary.json": "d2fcc3a2d48a266b45faad288268d7e3d090ce9b546220360073a58831cc81ae",
+    "frozen_protocol.json": "8cb2360458856adb96737c6c734a73de667148c675f2a275b1500c4a88a41930",
+    "manifest.json": "265b3b33ac6505ca578c79fbfb4ba1152dd1cd3b4158427f59d987f4bd4ea478",
+    "pilot_selections.json": "98557b94836f61acc4f6b19c5e36f5f76c5468111252c86efb929a8657147150",
+    "run.log": "51e07c1d9e160f82cc1759f1f6dec07cf9db494777739b64079a2408752060ba",
+    "run_config.json": "c866467878f0e95cf904ddbd1c98bd385b144079192a068640b3b7030eb2e547",
+    "selected_rates.json": "2db20b030fb020736ca7038cc6890badba4fff486e27a1ab9cb0e185edd603f7",
+    "verification.json": "6543a020708adab5cff46bca5c85e7555cb8b23d547b6826d618a51cb7f9f7a3",
+    "figures/pilot_scores.png": "3010272c4696f14b13edcd0ab7ff195b117bf9aaf01691f8b251252085d75c8f",
+    "figures/transfer_scores.png": "f63e391736f80999f3c5ae7d1bd540a2d6ad70d88c1f5b1456cc817ed178f236",
+    "raw/evaluation.jsonl": "aa6df03088dba5f6bf6e7f166d3b67c421813807824a39e6afac21e8b2010f2d",
+    "raw/evaluation_not_run.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "raw/pilot_round0_adam.jsonl": "4268f7a78a270baaafb5e173d7648a8e9fa23bc4af647b7ea0f333dab8a5687a",
+    "raw/pilot_round0_diagonal_gd.jsonl": "7149ed533af02ac2f430a8ab4931acc77a07087638ae77bc57c5d2e041fd733a",
+    "raw/pilot_round0_eigenbasis_adam.jsonl": "cb8086eb0f1990797119323ac8226f795411ba57342952995453b29fdfcc56f6",
+    "raw/pilot_round0_gd.jsonl": "b5de48bde476ff830c24773844fa433f7df98de2dcf547ff5371d3148d64b5a7",
+    "raw/pilot_round0_heavy_ball.jsonl": "4d4587d2a437aa08a66e02e58b5c2d08bfabf3423833c882281d04b5fcc37c90",
+    "raw/pilot_round1_adam.jsonl": "8cd8d89bdf8757cb953580a7335731def4ac9b47595ddc93a79bc245cecf0490",
+    "raw/tuning.jsonl": "6656df19857b1ec269fe0722b3d9fe7ba739736c205e7515c0c0e5ccd44f6d14",
+    "tables/evaluation_runs.csv": "93167433e14b2ce689ec4f0b055c64f6391347053d30affaef94cc4745f22b38",
+    "tables/evaluation_traces.csv": "cbafbb1164c5bbc21d4a34026b42a5264a69611bb197ea6ad6180f5e5ce7a7a6",
+    "tables/failures.jsonl": "57309dc05311686e469d8cb63a9ac30171cc22e51024dd28b76ecd5de7746764",
+    "tables/pairs.csv": "6ef7f4e9c96cbe5a6a8f644bb9b534fd495edaf73b0f182f85518ae673b6b1c7",
+    "tables/pilot_runs.csv": "2df35f862ab0661edfd22a7ca5ce1bb8a34e054408e904e0b66333d6e6af9379",
+    "tables/selected_rates.csv": "42e11f4cf44edc14cc16184fba8292ef77896e11481f97f71cab2c8a78589b52",
+    "tables/status_summary.csv": "ccaa91ba8884ae5313fcc988dd1e94a8cdb9ffc3a2c135310e5b4187896af556",
+    "tables/tuning_runs.csv": "216a355db5fb5466cd4248aeb02a96f2fc0c6c5c5e6a031505c5894e7976182f",
+    "tables/tuning_scores.csv": "1ea48a9c6a0072f971b3143a49d255043a01dc90a021b3aa42edb04161564989"
+  },
+  "reports": {
+    "all_five_double_pass_compilation_passed": true,
+    "unresolved_references_or_overflow": false,
+    "module4_pages": 6,
+    "module4_all_pages_visually_checked": true
+  },
+  "privacy": {
+    "tracked_files_checked": 78,
+    "credential_patterns_absent": true,
+    "known_student_identifiers_absent": true,
+    "private_course_pdfs_not_tracked": true,
+    "pdfs": [
+      {
+        "path": "outputs/reports/part1_report.pdf",
+        "pages": 4,
+        "student_identifiers_absent_in_text_and_metadata": true
+      },
+      {
+        "path": "outputs/reports/part2_report.pdf",
+        "pages": 4,
+        "student_identifiers_absent_in_text_and_metadata": true
+      },
+      {
+        "path": "outputs/reports/part3_report.pdf",
+        "pages": 7,
+        "student_identifiers_absent_in_text_and_metadata": true
+      },
+      {
+        "path": "outputs/reports/part4_report.pdf",
+        "pages": 6,
+        "student_identifiers_absent_in_text_and_metadata": true
+      },
+      {
+        "path": "outputs/reports/part5_report.pdf",
+        "pages": 5,
+        "student_identifiers_absent_in_text_and_metadata": true
+      },
+      {
+        "path": "outputs/part4/pdf/part4_report.pdf",
+        "pages": 6,
+        "student_identifiers_absent_in_text_and_metadata": true
+      }
+    ],
+    "upstream_other_owner_release_modified": false
+  },
+  "limits": {
+    "historical_optimizer_runs_rerun_in_this_integration": false,
+    "historical_full_numerical_replay_passed": false,
+    "prior_team_sampled_runs": 450,
+    "prior_team_mismatched_runs": 56,
+    "contributor_sampled_runs": 30,
+    "contributor_mismatched_runs": 2,
+    "contributor_mismatched_fields": 9,
+    "caveat": "Different historical replay audits; not counts of divergent evaluation runs. Statistical recomputation does not resolve the replay differences.",
+    "controlled_timing_benchmark_completed": false,
+    "upstream_other_owner_release_modified": false
+  },
+  "github_verification": "PR and exact merged-commit CI plus downloadable asset hashes are recorded in release validation metadata after publication."
+}
