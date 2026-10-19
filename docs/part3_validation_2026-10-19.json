@@ -1,0 +1,144 @@
+{
+  "date": "2026-10-19",
+  "contribution_commit": "575ebf4ce842d8f7996512b7619551fe8332e8a7",
+  "main_base_commit": "44542a86187df4e6e780e349ebc2b2f187619a44",
+  "current_implementation": {
+    "unit_tests_passed": 89,
+    "module3_tests_included": 44,
+    "default_integrated_checks_passed": true,
+    "module3_smoke": {
+      "passed": true,
+      "errors": [],
+      "sample_per_stage": 60,
+      "seed": 20261018,
+      "structural_checks_passed": true,
+      "numerical_checks_passed": true,
+      "complete_stage_records": {
+        "pilot": 168,
+        "tuning": 600,
+        "evaluation": 240
+      },
+      "numerical_runs_rechecked": {
+        "pilot": 60,
+        "tuning": 60,
+        "evaluation": 60
+      },
+      "not_run_placeholders": 0,
+      "pairs_checked": 144,
+      "historical_source_identity_preserved": true,
+      "numerical_tolerance": {
+        "rtol": 1e-08,
+        "atol": 1e-12
+      }
+    }
+  },
+  "review_environment": {
+    "python": "3.12.14",
+    "numpy": "2.5.4",
+    "platform": "Windows"
+  },
+  "historical_dataset": {
+    "release": "https://github.com/akaComic/aisc5020-coordinate-geometry/releases/tag/part3-v1",
+    "asset": "part3_outputs_1.zip",
+    "sha256": "b361962401ab33578818be9781460daf4d5a72abc5b47f7632632dade815cd5b",
+    "manifest_commit": "575ebf4ce842d8f7996512b7619551fe8332e8a7",
+    "original_metadata_bytes_preserved": true,
+    "optimizer_core_files_unchanged": [
+      "adam.py",
+      "eigenbasis.py",
+      "runner.py",
+      "problems.py"
+    ]
+  },
+  "historical_sampling_before_final_csv_metadata_patch": {
+    "structural_checks_passed": true,
+    "numerical_checks_passed": false,
+    "complete_stage_records": {
+      "pilot": 5760,
+      "tuning": 52000,
+      "evaluation": 10200
+    },
+    "numerical_runs_rechecked": {
+      "pilot": 150,
+      "tuning": 150,
+      "evaluation": 150
+    },
+    "pairs_checked": 6600,
+    "numerical_tolerance": {
+      "rtol": 1e-08,
+      "atol": 1e-12
+    },
+    "numerically_mismatched_runs": 56,
+    "mismatched_by_stage": {
+      "evaluation": 38,
+      "pilot": 7,
+      "tuning": 11
+    },
+    "mismatched_by_algorithm": {
+      "adam": 23,
+      "eigenbasis_adam": 33
+    },
+    "mismatched_fields": 215
+  },
+  "final_csv_metadata_patch_validation": {
+    "passed": true,
+    "errors": [],
+    "sample_per_stage": 1,
+    "seed": 20261018,
+    "structural_checks_passed": true,
+    "numerical_checks_passed": true,
+    "complete_stage_records": {
+      "pilot": 5760,
+      "tuning": 52000,
+      "evaluation": 10200
+    },
+    "numerical_runs_rechecked": {
+      "pilot": 1,
+      "tuning": 1,
+      "evaluation": 1
+    },
+    "not_run_placeholders": 0,
+    "pairs_checked": 6600,
+    "historical_source_identity_preserved": true,
+    "numerical_tolerance": {
+      "rtol": 1e-08,
+      "atol": 1e-12
+    }
+  },
+  "sample_first_attainment_mismatches": 1,
+  "controlled_sensitivity_example": {
+    "run_id": "pilot|r0|eigenbasis_adam|p20|k10|all|pilot-rot01|pilo-o1-i00|c11",
+    "controlled_same_runtime_trials": [
+      {
+        "perturbation": "none",
+        "initial_difference_norm": 0.0,
+        "final_relative_loss": 9.457765798600661e-05,
+        "first_attainment": 122,
+        "status": "finite_cap",
+        "threshold_retained": false
+      },
+      {
+        "perturbation": "+1 ULP first component",
+        "initial_difference_norm": 2.7755575615628914e-17,
+        "final_relative_loss": 1.0810153963631816e-07,
+        "first_attainment": 122,
+        "status": "finite_cap",
+        "threshold_retained": true
+      },
+      {
+        "perturbation": "-1 ULP first component",
+        "initial_difference_norm": 2.7755575615628914e-17,
+        "final_relative_loss": 1.0151580872868891e-06,
+        "first_attainment": 122,
+        "status": "finite_cap",
+        "threshold_retained": false
+      }
+    ],
+    "interpretation": "This controlled perturbation checks sensitivity in the current environment. It does not identify the exact perturbation or cause of the archived Linux/Windows discrepancy."
+  },
+  "scope": [
+    "The 450 historical numerical reruns used the enhanced verifier before its final metadata-only CSV consistency patch. The final verifier separately rechecked all historical structures/tables and one numerical run per stage.",
+    "The full historical main experiment was not re-executed. Historical numerical validation failed on the current Windows environment; it is not claimed as a full numerical reproduction.",
+    "No numerical tolerance was widened to turn the historical mismatches into a pass. A controlled one-ULP perturbation demonstrates sensitivity of one current trajectory, not the exact cause of the Linux/Windows historical difference."
+  ]
+}

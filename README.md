@@ -6,7 +6,7 @@
 
 AISC5020 小组项目：在固定 Hessian 特征值的条件下，研究坐标旋转如何影响 GD、heavy-ball momentum、Adam 和预条件方法。
 
-这个仓库包含统一的问题与运行接口、联调用 smoke、第 1 部分 GD / heavy-ball 理论验证、第 2 部分 Adam 坐标依赖诊断，以及第 5 部分特征坐标 Adam 实现与独立验证。**这些模块验证不是全组调参后的主实验结果。** 完整研究结论要等各负责人复核推导、完成 pilot 和主实验后再写入报告。
+这个仓库已接入第 1、2、3、5 部分：统一的问题与运行接口、GD / heavy-ball 理论验证、Adam 坐标依赖诊断、调参与批量实验框架，以及特征坐标 Adam 独立验证。第 3 部分已发布按现有协议运行的一版完整实验数据；全组最终结论仍需组内确认协议，并由第 4 部分对接统计分析。模块 smoke 和结构验证不能替代主实验。
 
 ## 分工
 
@@ -42,15 +42,15 @@ macOS / Linux 可以运行 `python -m venv work/.venv`，再执行 `work/.venv/b
 
 本地输出保存在 `outputs/`。执行成功说明基础流程能运行；不能据此声称某个方法更好或主实验已经完成。提交实验分析时，应附运行命令、配置、seed、代码版本和输出说明。
 
-合并后的第 1、2、5 部分可以一次检查：
+已接入的模块可以一次检查：
 
 ```powershell
 .\scripts\verify_all.ps1 -NoPlots
 ```
 
-该命令运行全部测试、smoke 和三个模块的默认实验，并独立重建第 1、5 部分的保存轨迹。需要同时生成图表时，先安装 `.\work\.venv\Scripts\python.exe -m pip install -e '.[plots]'`，然后去掉 `-NoPlots`。GitHub Actions 在 Python 3.10 和 3.12 上执行相同的数值检查。报告的 `.tex` 源文件保留在 `docs/`；编译 PDF 和中间文件放在 `outputs/` 或 `work/`。
+该命令运行全部测试、公共 smoke、第 1、2、5 部分的默认实验，以及第 3 部分的小预算端到端实验和完整性核验。它不启动第 3 部分耗时较长的主实验。需要同时生成图表时，先安装 `.\work\.venv\Scripts\python.exe -m pip install -e '.[plots]'`，然后去掉 `-NoPlots`。GitHub Actions 在 Python 3.10 和 3.12 上执行相同的数值检查。报告的 `.tex` 源文件保留在 `docs/`；编译 PDF 和中间文件放在 `outputs/` 或 `work/`。
 
-安装提供 `pdflatex` 的 MiKTeX 或 TeX Live 后，可运行 `.\scripts\build_reports.ps1`，双次编译第 1、2、5 部分报告到 `outputs/reports/`；脚本会检查未解析引用及内容溢出。
+安装提供 `pdflatex` 的 MiKTeX 或 TeX Live 后，可运行 `.\scripts\build_reports.ps1`，双次编译第 1、2、3、5 部分报告到 `outputs/reports/`；脚本会检查未解析引用及内容溢出。
 
 ## 第 2 部分：Adam 坐标依赖诊断
 
@@ -194,7 +194,7 @@ python -m coordinate_geometry.verify_part5 --output outputs/part5
 .\scripts\part3.ps1                      # 测试 + smoke，输出到 outputs/part3_smoke
 ```
 
-主实验按阶段运行，每个阶段都可中断后续跑（已保存的 run 会跳过）：
+主实验按阶段运行；仅在代码来源和协议一致时才复用已保存的运行：
 
 ```powershell
 .\scripts\part3.ps1 -Stage pilot         # pilot：确定并冻结各算法的 16 个候选学习率
@@ -210,4 +210,6 @@ python -m coordinate_geometry.part3_experiments --config configs/part3.json --ou
 python -m coordinate_geometry.verify_part3 --output outputs/part3
 ```
 
-结果写入 `outputs/part3/`：`raw/` 保存每次运行的完整记录（JSONL），`tables/` 提供给第 4 部分的整洁表格（`evaluation_runs.csv`、`pairs.csv`、`evaluation_traces.csv`、`failures.jsonl`、`selected_rates.csv`、`tuning_scores.csv`、`status_summary.csv`），另有 `frozen_protocol.json`、`budget_summary.json` 与 `manifest.json`。pilot、调参与评估使用互不重叠的 seed 流；冻结协议之后修改调参相关设置会被拒绝，需在新的输出目录重新 pilot。
+结果写入 `outputs/part3/`：`raw/` 保存每次运行的完整记录（JSONL），`tables/` 提供给第 4 部分的整洁表格（`evaluation_runs.csv`、`pairs.csv`、`evaluation_traces.csv`、`failures.jsonl`、`selected_rates.csv`、`tuning_scores.csv`、`status_summary.csv`），另有 `execution_origin.json`、`frozen_protocol.json`、`budget_summary.json` 与 `manifest.json`。pilot、调参与评估使用互不重叠的 seed 流。来源指纹、研究定义或预算不兼容时会拒绝续跑及重新生成报告，需使用新目录；失败的校验不会覆盖旧来源。旧版无来源文件的实验可独立核验，但不会被自动补记成新实现的结果。
+
+本次修复及验证的实际范围见 [审计记录](docs/part3_validation_2026-10-19.json)。当前默认联检通过；原 Release 数据的完整性与表格核验通过，但在当前 Windows 环境复跑的 450 个历史样本中，56 个 Adam / 特征坐标 Adam 运行超出数值容差，不能标记为完整的跨平台数值复现通过。原数据及来源保持不变，具体限制见第三部分指南与报告。

@@ -41,7 +41,7 @@ import numpy as np
 
 from .contracts import ALGORITHMS, RunConfig
 from .part3_design import (build_instance, evaluation_orientations, evaluation_units,
-                           kappa_code, retune_units, search_units, spectrum, theory_parameters,
+                           integer_setting, kappa_code, retune_units, search_units, spectrum, theory_parameters,
                            validate_study)
 from .part3_tuning import (TIE_BREAKS, candidate_grid, candidate_score, check_range, revise_range, run_failed,
                            select_rate, stability_cap)
@@ -53,6 +53,7 @@ PARAM_KEYS = ("beta", "beta1", "beta2", "epsilon", "basis_source")
 PROTOCOL_FIELDS = ("root_seed", "tolerance", "explosive_threshold", "tuning", "pilot",
                    "stability_cap_fraction", "algorithms")
 NOT_RUN = "not_run_tuning_failure"
+PROVENANCE_VERSION = 2
 
 
 # ---------------------------------------------------------------------------
@@ -69,20 +70,43 @@ def sha256_text(text: str) -> str:
 
 def protocol_hash(config: dict[str, Any]) -> str:
     """Hash of every setting that changes candidate rates or tuning outcomes."""
-    return sha256_text(canonical_json({key: config[key] for key in PROTOCOL_FIELDS}))
+    fields = (*PROTOCOL_FIELDS, "studies", "evaluation", "theory_references")
+    return sha256_text(canonical_json({key: config[key] for key in fields}))
+
+
+def compatible_configuration(original: dict[str, Any], requested: dict[str, Any]) -> None:
+    """Only unchanged whole studies may be omitted, with their seed namespaces intact."""
+    a = {k: v for k, v in original.items() if k != "studies"}
+    b = {k: v for k, v in requested.items() if k != "studies"}
+    if canonical_json(a) != canonical_json(b):
+        raise SystemExit("execution configuration changed; use a fresh output directory")
+    studies = {s["name"]: s for s in original["studies"]}
+    if not requested["studies"] or any(
+        s["name"] not in studies or canonical_json(s) != canonical_json(studies[s["name"]])
+        for s in requested["studies"]
+    ):
+        raise SystemExit("studies may only be an unchanged whole-study subset; use a fresh output directory")
+
+
+def _finite_setting(value: Any, name: str, *, low: float = 0.0, inclusive: bool = False) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError(f"{name} must be a finite number")
+    outside = value < low if inclusive else value <= low
+    if outside:
+        raise ValueError(f"{name} must be {'>=' if inclusive else '>'} {low}")
+    return float(value)
 
 
 def load_config(path: Path) -> dict[str, Any]:
     config = json.loads(Path(path).read_text(encoding="utf-8"))
-    if config.get("schema_version") != SCHEMA_VERSION:
+    if integer_setting(config.get("schema_version"), "schema_version", 1) != SCHEMA_VERSION:
         raise ValueError(f"schema_version must be {SCHEMA_VERSION}")
     if config.get("study_status") not in STUDY_STATUSES:
         raise ValueError(f"study_status must be one of {STUDY_STATUSES}")
     for key in (*PROTOCOL_FIELDS, "evaluation", "studies", "theory_references"):
         if key not in config:
             raise ValueError(f"config is missing {key!r}")
-    if not isinstance(config["root_seed"], int) or config["root_seed"] < 0:
-        raise ValueError("root_seed must be a non-negative integer")
+    integer_setting(config["root_seed"], "root_seed")
     tuning, evaluation, pilot = config["tuning"], config["evaluation"], config["pilot"]
     for section, keys in ((tuning, ("max_steps", "candidates", "inits_per_orientation",
                                     "transfer_orientations", "loss_floor", "tie_atol")),
@@ -91,7 +115,27 @@ def load_config(path: Path) -> dict[str, Any]:
         missing = [k for k in keys if k not in section]
         if missing:
             raise ValueError(f"config section is missing {missing}")
+    for name in ("max_steps", "inits_per_orientation", "transfer_orientations"):
+        integer_setting(tuning[name], f"tuning.{name}", 1)
+    integer_setting(tuning["candidates"], "tuning.candidates", 2)
+    for name in ("max_steps", "record_every"):
+        integer_setting(evaluation[name], f"evaluation.{name}", 1)
+    for name in ("orientations", "inits_per_orientation", "max_rounds"):
+        integer_setting(pilot[name], f"pilot.{name}", 1)
+    _finite_setting(pilot["expansion_factor"], "pilot.expansion_factor", low=1)
+    _finite_setting(tuning["loss_floor"], "tuning.loss_floor")
+    _finite_setting(tuning["tie_atol"], "tuning.tie_atol", inclusive=True)
+    tolerance = _finite_setting(config["tolerance"], "tolerance")
+    if tolerance >= 1:
+        raise ValueError("tolerance must be less than one")
+    _finite_setting(config["explosive_threshold"], "explosive_threshold", low=1)
+    if not isinstance(config["theory_references"], bool):
+        raise ValueError("theory_references must be a boolean")
     checkpoints = evaluation["checkpoints"]
+    if not isinstance(checkpoints, list) or not checkpoints:
+        raise ValueError("checkpoints must be a nonempty integer list")
+    for value in checkpoints:
+        integer_setting(value, "evaluation.checkpoints", 1)
     if sorted(set(checkpoints)) != checkpoints or checkpoints[-1] != evaluation["max_steps"]:
         raise ValueError("checkpoints must be ascending and end at the evaluation budget")
     if any(b % evaluation["record_every"] for b in checkpoints):
@@ -103,6 +147,7 @@ def load_config(path: Path) -> dict[str, Any]:
     if pilot["max_rounds"] < 1:
         raise ValueError("pilot needs at least one round")
     fraction = config["stability_cap_fraction"]
+    _finite_setting(fraction, "stability_cap_fraction")
     if not 0 < fraction < 1:
         raise ValueError("stability_cap_fraction must lie in (0, 1)")
     enabled = enabled_algorithms(config)
@@ -114,14 +159,19 @@ def load_config(path: Path) -> dict[str, Any]:
         unknown = set(spec.get("params", {})) - set(PARAM_KEYS)
         if unknown:
             raise ValueError(f"{name}: unknown parameters {sorted(unknown)}")
+        if "enabled" in spec and not isinstance(spec["enabled"], bool):
+            raise ValueError(f"{name}.enabled must be a boolean")
         low, high = spec["range"]
         check_range(name, spec.get("params", {}), low, high, fraction)
         candidate_grid(low, high, tuning["candidates"])
+        RunConfig(name, low, tuning["max_steps"], **spec.get("params", {}))
+    if not isinstance(config["studies"], list) or not config["studies"]:
+        raise ValueError("studies must be a nonempty list")
+    for study in config["studies"]:
+        validate_study(study)
     names = [s["name"] for s in config["studies"]]
     if len(set(names)) != len(names) or any("|" in n for n in names):
         raise ValueError("study names must be unique and must not contain '|'")
-    for study in config["studies"]:
-        validate_study(study)
     return config
 
 
@@ -145,17 +195,18 @@ def make_spec(config: dict[str, Any], *, stage: str, regime: str, round_index: i
               run_id: str, reference_run_id: str | None = None) -> dict[str, Any]:
     spec = {
         "run_id": run_id, "stage": stage, "regime": regime, "round": round_index,
-        "study": study["name"], "dimension": int(study["dimension"]), "kappa": float(kappa),
+        "study": study["name"], "dimension": integer_setting(study["dimension"], "dimension", 1), "kappa": float(kappa),
         "control": float(kappa) == 1.0,
         "orientation": unit["orientation"], "init": unit["init"],
         "role": unit.get("role"), "pair_id": unit.get("pair_id"),
         "reference_run_id": reference_run_id, "cluster_id": unit.get("cluster_id"),
         "cell": cell, "algorithm": algorithm, "candidate_index": candidate_index,
         "learning_rate": float(learning_rate), "params": params,
-        "max_steps": int(max_steps), "record_every": int(record_every),
-        "checkpoints": list(checkpoints), "tolerance": float(config["tolerance"]),
+        "max_steps": integer_setting(max_steps, "max_steps", 1),
+        "record_every": integer_setting(record_every, "record_every", 1),
+        "checkpoints": [integer_setting(b, "checkpoints", 1) for b in checkpoints], "tolerance": float(config["tolerance"]),
         "explosive_threshold": float(config["explosive_threshold"]),
-        "root_seed": int(config["root_seed"]),
+        "root_seed": integer_setting(config["root_seed"], "root_seed"),
     }
     spec["spec_sha256"] = sha256_text(canonical_json(spec))
     return spec
@@ -206,21 +257,154 @@ def execute_spec(spec: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
-def read_jsonl(path: Path) -> list[dict[str, Any]]:
+def current_sources() -> dict[str, str]:
+    """Content identity, independent of Git cleanliness and checkout newline style."""
+    package = Path(__file__).resolve().parent
+    return {p.name: hashlib.sha256(p.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+            for p in sorted(package.glob("*.py"))}
+
+
+def source_fingerprint() -> str:
+    return sha256_text(canonical_json(current_sources()))
+
+
+def read_execution_origin(out: Path) -> dict[str, Any]:
+    path = out / "execution_origin.json"
     if not path.exists():
-        return []
+        raise SystemExit("output has no immutable execution origin; verify legacy data read-only or use a fresh directory")
+    origin = json.loads(path.read_text(encoding="utf-8"))
+    unhashed = {k: v for k, v in origin.items() if k != "origin_sha256"}
+    if origin.get("provenance_version") != PROVENANCE_VERSION or (
+        origin.get("origin_sha256") != sha256_text(canonical_json(unhashed))
+    ):
+        raise SystemExit("execution_origin.json is invalid; refusing to relabel saved runs")
+    if origin.get("source_fingerprint") != sha256_text(canonical_json(origin.get("source_sha256"))):
+        raise SystemExit("execution origin source identity is inconsistent")
+    if origin.get("config_sha256") != sha256_text(canonical_json(origin.get("config"))):
+        raise SystemExit("execution origin configuration identity is inconsistent")
+    return origin
+
+
+def check_execution_context(config: dict[str, Any], out: Path) -> dict[str, Any]:
+    origin = read_execution_origin(out)
+    if origin["source_sha256"] != current_sources():
+        raise SystemExit("execution source changed; saved runs cannot be reused under a new implementation")
+    if origin["python"] != platform.python_version() or origin["numpy"] != np.__version__:
+        raise SystemExit("execution Python/NumPy changed; use a fresh output directory")
+    if origin["thread_env"] != {k: os.environ.get(k) for k in origin["thread_env"]}:
+        raise SystemExit("execution BLAS thread settings changed; use a fresh output directory")
+    compatible_configuration(origin["config"], config)
+    manifest = out / "manifest.json"
+    if manifest.exists() and json.loads(manifest.read_text(encoding="utf-8")).get("execution_origin_sha256") != origin["origin_sha256"]:
+        raise SystemExit("manifest does not identify this immutable execution origin")
+    return origin
+
+
+def begin_execution_context(config: dict[str, Any], out: Path, *, allow_new: bool) -> dict[str, Any]:
+    """Preflight existing data without writes; start a new origin only for a new pilot."""
+    if (out / "execution_origin.json").exists():
+        return check_execution_context(config, out)
+    if out.exists() and any(out.iterdir()):
+        raise SystemExit("legacy or unknown output provenance; verify it read-only and execute into a fresh directory")
+    if not allow_new:
+        raise SystemExit("start a new output directory with --stage pilot or --stage all")
+    sources = current_sources()
+    try:
+        blas = np.show_config(mode="dicts").get("Build Dependencies", {}).get("blas")
+    except (TypeError, AttributeError):
+        blas = None
+    origin = {
+        "provenance_version": PROVENANCE_VERSION,
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "config": config, "config_sha256": sha256_text(canonical_json(config)),
+        "source_sha256": sources, "source_fingerprint": sha256_text(canonical_json(sources)),
+        "source_hash_normalization": "CRLF to LF",
+        "git": git_state(Path(__file__).resolve().parents[2]),
+        "python": platform.python_version(), "numpy": np.__version__,
+        "platform": platform.platform(), "processor": platform.processor(), "cpu_count": os.cpu_count(),
+        "blas": blas, "thread_env": {k: os.environ.get(k) for k in
+                                      ("OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "OMP_NUM_THREADS")},
+    }
+    origin["origin_sha256"] = sha256_text(canonical_json(origin))
+    out.mkdir(parents=True, exist_ok=True)
+    # Exclusive creation: never replace a historical origin, even after failure.
+    with (out / "execution_origin.json").open("x", encoding="utf-8") as handle:
+        handle.write(json.dumps(origin, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
+    write_json(out / "run_config.json", config)
+    return origin
+
+
+def _replace_bytes(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_bytes(content)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _jsonl_snapshot(path: Path, *, recover_tail: bool = False) -> tuple[list[dict[str, Any]], bytes | None]:
+    if not path.exists():
+        return [], None
     records = []
-    lines = path.read_text(encoding="utf-8").splitlines()
+    content = path.read_bytes()
+    lines = content.splitlines(keepends=True)
+    offset = 0
     for number, line in enumerate(lines):
         if not line.strip():
+            offset += len(line)
             continue
         try:
-            records.append(json.loads(line))
-        except json.JSONDecodeError:
-            if number == len(lines) - 1:  # interrupted final write; rerun that spec
-                continue
-            raise
-    return records
+            value = json.loads(line.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            if recover_tail and number == len(lines) - 1 and not line.endswith((b"\n", b"\r")):
+                return records, content[:offset]
+            raise RuntimeError(f"{path}: invalid JSON at line {number + 1}; file was not changed") from error
+        if not isinstance(value, dict):
+            raise RuntimeError(f"{path}: line {number + 1} is not a run object")
+        records.append(value)
+        offset += len(line)
+    repaired = content + b"\n" if content and not content.endswith((b"\n", b"\r")) else None
+    return records, repaired
+
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    """Strict read: only run_batch may repair an interrupted, unterminated tail."""
+    return _jsonl_snapshot(path)[0]
+
+
+def _validate_saved_record(record: dict[str, Any], spec: dict[str, Any], fingerprint: str) -> None:
+    if record.get("execution_source_sha256") != fingerprint:
+        raise RuntimeError("cached run has different or missing execution source provenance; use a fresh output directory")
+    if record.get("spec_sha256") != spec["spec_sha256"] or any(
+        record.get(key) != value for key, value in spec.items() if key not in ("checkpoints", "spec_sha256")
+    ):
+        raise RuntimeError(f"saved run holds a different specification for {spec['run_id']}; use a fresh output directory")
+    if set(record.get("checkpoints", {})) != {str(step) for step in spec["checkpoints"]}:
+        raise RuntimeError(f"saved checkpoints do not match the plan for {spec['run_id']}")
+
+
+def planned_records(specs: list[dict[str, Any]], records: list[dict[str, Any]], label: str) -> list[dict[str, Any]]:
+    """Require the complete current plan while excluding caches of omitted studies."""
+    wanted = {s["run_id"]: s for s in specs}
+    if len(wanted) != len(specs):
+        raise RuntimeError(f"{label}: duplicate identifiers in plan")
+    by_id = {}
+    fingerprint = source_fingerprint()
+    for record in records:
+        run_id = record["run_id"]
+        if run_id in by_id:
+            raise RuntimeError(f"{label}: duplicate cached run {run_id}")
+        by_id[run_id] = record
+        if record.get("execution_source_sha256") != fingerprint:
+            raise RuntimeError(f"{label}: cached execution source changed or is unknown")
+        if run_id in wanted:
+            _validate_saved_record(record, wanted[run_id], fingerprint)
+    missing = set(wanted) - set(by_id)
+    if missing:
+        raise RuntimeError(f"{label}: incomplete saved plan ({len(missing)} missing runs)")
+    return [by_id[s["run_id"]] for s in specs]
 
 
 def run_batch(specs: list[dict[str, Any]], path: Path, workers: int, label: str,
@@ -230,13 +414,21 @@ def run_batch(specs: list[dict[str, Any]], path: Path, workers: int, label: str,
     if len(set(ids)) != len(ids):
         raise RuntimeError(f"{label}: duplicate run identifiers in plan")
     done = {}
-    for record in read_jsonl(path):
+    fingerprint = source_fingerprint()
+    saved, repaired = _jsonl_snapshot(path, recover_tail=True)
+    for record in saved:
+        if record["run_id"] in done:
+            raise RuntimeError(f"{label}: duplicate cached run {record['run_id']}")
+        if record.get("execution_source_sha256") != fingerprint:
+            raise RuntimeError(f"{label}: execution source changed or is unknown; use a fresh output directory")
         done[record["run_id"]] = record
     wanted = {s["run_id"]: s for s in specs}
     for run_id, record in done.items():
-        if run_id in wanted and record.get("spec_sha256") != wanted[run_id]["spec_sha256"]:
-            raise RuntimeError(f"{label}: {path} holds a different specification for {run_id}; "
-                               "use a fresh output directory instead of mixing protocols")
+        if run_id in wanted:
+            _validate_saved_record(record, wanted[run_id], fingerprint)
+    # Repair only after every retained record and requested specification passed.
+    if repaired is not None:
+        _replace_bytes(path, repaired)
     todo = [s for s in specs if s["run_id"] not in done]
     log(f"{label}: {len(specs)} planned, {len(specs) - len(todo)} already saved, {len(todo)} to run "
         f"({sum(s['max_steps'] for s in todo):,} gradient calls), workers={workers}")
@@ -246,6 +438,7 @@ def run_batch(specs: list[dict[str, Any]], path: Path, workers: int, label: str,
         report_every = max(1, len(todo) // 20)
         with path.open("a", encoding="utf-8") as handle:
             def save(index: int, record: dict[str, Any]) -> None:
+                record["execution_source_sha256"] = fingerprint
                 handle.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
                 done[record["run_id"]] = record
                 if (index + 1) % report_every == 0 or index + 1 == len(todo):
@@ -356,6 +549,7 @@ def pilot_specs(config: dict[str, Any], algorithm: str, rates: list[float], roun
 
 
 def stage_pilot(config: dict[str, Any], out: Path, workers: int, log: Logger) -> dict[str, Any]:
+    origin = check_execution_context(config, out)
     tuning, pilot = config["tuning"], config["pilot"]
     fraction = config["stability_cap_fraction"]
     state = {alg: {"range": list(config["algorithms"][alg]["range"]), "history": [], "resolved": False,
@@ -409,6 +603,8 @@ def stage_pilot(config: dict[str, Any], out: Path, workers: int, log: Logger) ->
         }
     cost = estimate_cost(config, timing, frozen)
     protocol = {"study_status": config["study_status"], "frozen": True,
+                "provenance_version": PROVENANCE_VERSION,
+                "configuration": config, "execution_origin_sha256": origin["origin_sha256"],
                 "frozen_utc": datetime.now(timezone.utc).isoformat(),
                 "protocol_sha256": protocol_hash(config), "algorithms": frozen,
                 "pilot_seconds_per_gradient_call": {f"{a}|p{p}": v[0] / v[1] for (a, p), v in timing.items() if v[1]},
@@ -425,13 +621,17 @@ def stage_pilot(config: dict[str, Any], out: Path, workers: int, log: Logger) ->
 # ---------------------------------------------------------------------------
 
 def load_protocol(config: dict[str, Any], out: Path) -> dict[str, Any]:
+    origin = check_execution_context(config, out)
     path = out / "frozen_protocol.json"
     if not path.exists():
         raise SystemExit(f"{path} not found: run --stage pilot first so ranges are frozen before tuning")
     protocol = json.loads(path.read_text(encoding="utf-8"))
-    if protocol["protocol_sha256"] != protocol_hash(config):
-        raise SystemExit("frozen_protocol.json was made with different tuning/algorithm settings; "
-                         "rerun the pilot in a fresh output directory")
+    if protocol.get("provenance_version") != PROVENANCE_VERSION or protocol.get("execution_origin_sha256") != origin["origin_sha256"]:
+        raise SystemExit("frozen protocol has unknown or incompatible execution provenance")
+    frozen_config = protocol.get("configuration")
+    if frozen_config is None or protocol["protocol_sha256"] != protocol_hash(frozen_config):
+        raise SystemExit("frozen protocol configuration is inconsistent")
+    compatible_configuration(frozen_config, config)
     missing = set(enabled_algorithms(config)) - set(protocol["algorithms"])
     if missing:
         raise SystemExit(f"frozen protocol lacks algorithms {sorted(missing)}")
@@ -537,11 +737,15 @@ def evaluation_plan(config: dict[str, Any], selections: list[dict[str, Any]]) ->
 
 
 def stage_evaluate(config: dict[str, Any], out: Path, workers: int, log: Logger) -> list[dict[str, Any]]:
-    load_protocol(config, out)
+    protocol = load_protocol(config, out)
     path = out / "selected_rates.json"
     if not path.exists():
         raise SystemExit(f"{path} not found: run --stage tune first")
-    selections = json.loads(path.read_text(encoding="utf-8"))["selections"]
+    selected = json.loads(path.read_text(encoding="utf-8"))
+    if selected.get("protocol_sha256") != protocol["protocol_sha256"]:
+        raise SystemExit("selected rates belong to a different frozen protocol")
+    names = {s["name"] for s in config["studies"]}
+    selections = [s for s in selected["selections"] if s["study"] in names]
     specs, placeholders = evaluation_plan(config, selections)
     if placeholders:
         log(f"evaluation: {len(placeholders)} runs not executed because their tuning failed")
@@ -600,8 +804,7 @@ def write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str] | No
 
 
 def write_json(path: Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False) + "\n", encoding="utf-8")
+    _replace_bytes(path, (json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8"))
 
 
 def log_gap(r: float | None, floor: float) -> float | None:
@@ -697,14 +900,42 @@ def pilot_files(out: Path) -> list[Path]:
 
 
 def stage_report(config: dict[str, Any], out: Path, log: Logger, plot: bool) -> None:
+    protocol = load_protocol(config, out)
     checkpoints = config["evaluation"]["checkpoints"]
     floor = config["tuning"]["loss_floor"]
     tables = out / "tables"
-    pilot = [r for p in pilot_files(out) for r in read_jsonl(p)]
-    tuning = read_jsonl(out / "raw" / "tuning.jsonl")
-    evaluation = read_jsonl(out / "raw" / "evaluation.jsonl")
+    pilot = []
+    for algorithm, details in protocol["algorithms"].items():
+        for entry in details["history"]:
+            rates = candidate_grid(*entry["range"], config["tuning"]["candidates"])
+            specs = pilot_specs(config, algorithm, rates, entry["round"])
+            path = out / "raw" / f"pilot_round{entry['round']}_{algorithm}.jsonl"
+            pilot.extend(planned_records(specs, read_jsonl(path), "pilot report"))
+    tuning = planned_records(tuning_plan(config, protocol), read_jsonl(out / "raw" / "tuning.jsonl"), "tuning report")
+    selection_path = out / "selected_rates.json"
+    selected = json.loads(selection_path.read_text(encoding="utf-8"))
+    if selected.get("protocol_sha256") != protocol["protocol_sha256"]:
+        raise SystemExit("selected rates belong to a different frozen protocol")
+    names = {s["name"] for s in config["studies"]}
+    selections = [s for s in selected["selections"] if s["study"] in names]
+    keys = ("regime", "algorithm", "study", "kappa", "cell")
+    selected_by_cell = {tuple(s[k] for k in keys): s for s in selections}
+    if len(selected_by_cell) != len(selections):
+        raise RuntimeError("duplicate saved tuning selections")
+    rebuilt = select_cells(tuning, {a: v["candidates"] for a, v in protocol["algorithms"].items()}, config, keys)
+    if len(rebuilt) != len(selections) or any(
+        any(selected_by_cell.get(tuple(s[k] for k in keys), {}).get(k) != v for k, v in s.items())
+        for s in rebuilt
+    ):
+        raise RuntimeError("saved tuning selections do not match the active tuning records")
+    evaluation_specs, expected_not_run = evaluation_plan(config, selections)
+    evaluation = planned_records(evaluation_specs, read_jsonl(out / "raw" / "evaluation.jsonl"), "evaluation report")
     not_run_path = out / "raw" / "evaluation_not_run.json"
-    evaluation += json.loads(not_run_path.read_text(encoding="utf-8")) if not_run_path.exists() else []
+    saved_not_run = json.loads(not_run_path.read_text(encoding="utf-8")) if not_run_path.exists() else []
+    saved_not_run = [r for r in saved_not_run if r["study"] in names]
+    if sorted(saved_not_run, key=lambda r: r["run_id"]) != sorted(expected_not_run, key=lambda r: r["run_id"]):
+        raise RuntimeError("saved tuning-failure placeholders do not match the active evaluation plan")
+    evaluation += saved_not_run
     budget = config["tuning"]["max_steps"]
     write_csv(tables / "pilot_runs.csv", [flat(r, [budget]) for r in pilot])
     write_csv(tables / "tuning_runs.csv", [flat(r, [budget]) for r in tuning])
@@ -724,9 +955,7 @@ def stage_report(config: dict[str, Any], out: Path, log: Logger, plot: bool) -> 
                 for r in pilot + tuning + evaluation if r["status"] != "finite_cap"]
     (tables / "failures.jsonl").write_text(
         "".join(json.dumps(f, ensure_ascii=False, allow_nan=False) + "\n" for f in failures), encoding="utf-8")
-    selection_path = out / "selected_rates.json"
     if selection_path.exists():
-        selections = json.loads(selection_path.read_text(encoding="utf-8"))["selections"]
         write_csv(tables / "selected_rates.csv", [{k: v for k, v in s.items() if not k.startswith("candidate_")}
                                                   for s in selections])
         write_csv(tables / "tuning_scores.csv", [
@@ -752,6 +981,8 @@ def stage_report(config: dict[str, Any], out: Path, log: Logger, plot: bool) -> 
     for r in evaluation:
         calls[f"evaluation_{r['regime']}"] += r["gradient_calls"]
     write_json(out / "budget_summary.json", {
+        "active_studies": [s["name"] for s in config["studies"]],
+        "report_scope": "active unchanged whole-study subset; cached rows of omitted studies are excluded",
         "gradient_calls_by_stage": dict(calls),
         "tuning_horizon": budget, "evaluation_horizon": config["evaluation"]["max_steps"],
         "note": ("Rates are selected at the tuning horizon and evaluated at the longer evaluation "
@@ -854,27 +1085,26 @@ def git_state(root: Path) -> dict[str, Any]:
 
 def write_manifest(out: Path, config_path: Path, config: dict[str, Any], args: argparse.Namespace,
                    stage_seconds: dict[str, float]) -> None:
-    package = Path(__file__).resolve().parent
-    sources = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(package.glob("*.py"))}
-    try:
-        blas = np.show_config(mode="dicts").get("Build Dependencies", {}).get("blas")
-    except (TypeError, AttributeError):
-        blas = None
+    origin = check_execution_context(config, out)
     previous = {}
     path = out / "manifest.json"
     if path.exists():
         previous = json.loads(path.read_text(encoding="utf-8"))
     history = previous.get("invocations", [])
     history.append({"utc": datetime.now(timezone.utc).isoformat(), "stage": args.stage,
-                    "workers": args.workers, "stage_wall_seconds": stage_seconds})
+                    "workers": args.workers, "stage_wall_seconds": stage_seconds,
+                    "active_config_sha256": sha256_text(canonical_json(config)),
+                    "active_studies": [s["name"] for s in config["studies"]]})
+    protocol_path = out / "frozen_protocol.json"
+    frozen_hash = json.loads(protocol_path.read_text(encoding="utf-8"))["protocol_sha256"] if protocol_path.exists() else protocol_hash(config)
     write_json(path, {
+        "provenance_version": PROVENANCE_VERSION,
+        "execution_origin_sha256": origin["origin_sha256"],
         "study_status": config["study_status"],
-        "config_path": str(config_path), "config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest(),
-        "protocol_sha256": protocol_hash(config), "git": git_state(package.parents[1]),
-        "source_sha256": sources, "python": platform.python_version(), "numpy": np.__version__,
-        "platform": platform.platform(), "processor": platform.processor(), "cpu_count": os.cpu_count(),
-        "blas": blas, "thread_env": {k: os.environ.get(k) for k in
-                                     ("OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "OMP_NUM_THREADS")},
+        "config_path": str(config_path), "config_sha256": sha256_text(canonical_json(config)),
+        "config_hash_format": "canonical JSON",
+        "protocol_sha256": frozen_hash, "active_protocol_sha256": protocol_hash(config),
+        **{k: origin[k] for k in ("git", "source_sha256", "python", "numpy", "platform", "processor", "cpu_count", "blas", "thread_env")},
         "timing_note": ("Per-run seconds come from the shared runner loop under the stated worker count; "
                         "with several workers they share the CPU and are not cost measurements."),
         "invocations": history,
@@ -889,11 +1119,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--plot", action="store_true", help="also draw score curves (needs '.[plots]')")
     args = parser.parse_args(argv)
+    if args.workers < 1:
+        parser.error("workers must be a positive integer")
     for name in ("OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "OMP_NUM_THREADS"):
         os.environ.setdefault(name, "1")  # inherited by spawned workers
     config = load_config(args.config)
-    args.output.mkdir(parents=True, exist_ok=True)
-    write_json(args.output / "run_config.json", config)
+    begin_execution_context(config, args.output, allow_new=args.stage in ("pilot", "all"))
+    if args.stage in ("tune", "evaluate", "report"):
+        load_protocol(config, args.output)
+    # A valid new stage may change data or derived tables. A previous audit must
+    # not remain labelled passed until the resulting artifacts are checked again.
+    (args.output / "verification.json").unlink(missing_ok=True)
     log = Logger(args.output / "run.log")
     log(f"part3 {args.stage}: config={args.config} status={config['study_status']} workers={args.workers}")
     stages = ("pilot", "tune", "evaluate", "report") if args.stage == "all" else (args.stage,)
@@ -910,6 +1146,8 @@ def main(argv: list[str] | None = None) -> int:
             stage_report(config, args.output, log, args.plot)
         seconds[stage] = time.perf_counter() - started
     write_manifest(args.output, args.config, config, args, seconds)
+    # Publish a new active subset only after every requested stage succeeded.
+    write_json(args.output / "run_config.json", config)
     log(f"part3 {args.stage} finished: {json.dumps({k: round(v, 1) for k, v in seconds.items()})}")
     return 0
 

@@ -32,13 +32,30 @@ REGIME_CODES = {"none": 0, "transfer": 1, "retune": 2}
 NORMALIZATIONS = ("loss", "unit_norm")
 
 
+def integer_setting(value: Any, name: str, minimum: int = 0) -> int:
+    """Validate a discrete setting without bool acceptance or numeric truncation."""
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)):
+        raise ValueError(f"{name} must be an integer, excluding booleans")
+    result = int(value)
+    if result < minimum:
+        raise ValueError(f"{name} must be >= {minimum}")
+    return result
+
+
 def study_code(name: str) -> int:
     """Stable 32-bit code for a study's seed namespace."""
     return int.from_bytes(hashlib.sha256(name.encode("utf-8")).digest()[:4], "big")
 
 
 def kappa_code(kappa: float) -> int:
-    value = float(kappa)
+    if isinstance(kappa, (bool, np.bool_)):
+        raise ValueError("condition numbers cannot be booleans")
+    if not isinstance(kappa, (int, float, np.integer, np.floating)):
+        raise ValueError("condition numbers must be finite real numbers")
+    try:
+        value = float(kappa)
+    except OverflowError as error:
+        raise ValueError("condition number is outside the finite float64 range") from error
     if not math.isfinite(value) or value < 1 or value != round(value):
         raise ValueError("condition numbers must be finite integers >= 1 so seed keys stay exact")
     return int(round(value))
@@ -50,20 +67,23 @@ def seed_key(stage: str, purpose: int, study: str, kappa: float, regime: str = "
         raise ValueError(f"unknown stage {stage!r}")
     if regime not in REGIME_CODES:
         raise ValueError(f"unknown regime {regime!r}")
-    if min(round_index, orientation_code, index) < 0:
-        raise ValueError("seed-key indices must be non-negative")
+    purpose = integer_setting(purpose, "purpose")
+    round_index = integer_setting(round_index, "round_index")
+    orientation_code = integer_setting(orientation_code, "orientation_code")
+    index = integer_setting(index, "index")
     return [STAGE_CODES[stage], purpose, study_code(study), kappa_code(kappa),
             REGIME_CODES[regime], round_index, orientation_code, index]
 
 
 def generator(root_seed: int, key: list[int] | tuple[int, ...]) -> np.random.Generator:
-    return np.random.default_rng(np.random.SeedSequence(entropy=int(root_seed), spawn_key=tuple(key)))
+    root_seed = integer_setting(root_seed, "root_seed")
+    checked_key = tuple(integer_setting(value, "seed key") for value in key)
+    return np.random.default_rng(np.random.SeedSequence(entropy=root_seed, spawn_key=checked_key))
 
 
 def spectrum(dimension: int, kappa: float) -> np.ndarray:
     """Eigenvalues in [1/kappa, 1], log-spaced; dimension two gives diag(1/kappa, 1)."""
-    if not isinstance(dimension, int) or dimension < 1:
-        raise ValueError("dimension must be a positive integer")
+    dimension = integer_setting(dimension, "dimension", 1)
     kappa_code(kappa)
     if dimension == 1:
         if kappa != 1:
@@ -132,7 +152,7 @@ def canonical_initial(eigenvalues: np.ndarray, direction: np.ndarray,
 
 def build_instance(spec: dict[str, Any], root_seed: int) -> tuple[QuadraticProblem, np.ndarray, np.ndarray]:
     """Rebuild (problem, initial point w0, canonical point z0) from a run specification."""
-    dimension = int(spec["dimension"])
+    dimension = integer_setting(spec["dimension"], "dimension", 1)
     eigenvalues = spectrum(dimension, spec["kappa"])
     orientation = Orientation.from_json(spec["orientation"])
     q = orientation.matrix(dimension, root_seed)
@@ -155,21 +175,45 @@ def validate_study(study: dict[str, Any]) -> None:
     for field in ("name", "dimension", "condition_numbers", "evaluation"):
         if field not in study:
             raise ValueError(f"study is missing {field!r}")
+    if not isinstance(study["name"], str) or not study["name"] or "|" in study["name"]:
+        raise ValueError("study name must be a nonempty string without '|'")
+    dimension = integer_setting(study["dimension"], "dimension", 1)
+    if not isinstance(study["condition_numbers"], list) or not study["condition_numbers"]:
+        raise ValueError("condition_numbers must be a nonempty list")
     for kappa in study["condition_numbers"]:
+        # Keep the pre-existing namespace restriction, rather than claiming that
+        # condition numbers are mathematically discrete. Integer-valued floats
+        # remain supported and generate exactly the same original seed keys.
         kappa_code(kappa)
+        if dimension == 1 and kappa != 1:
+            raise ValueError("a one-dimensional study has condition number one")
+    if len(set(study["condition_numbers"])) != len(study["condition_numbers"]):
+        raise ValueError("condition_numbers must be unique")
+    if not isinstance(study["evaluation"], dict):
+        raise ValueError("study evaluation must be an object")
     if is_planar(study):
         if study["dimension"] != 2:
             raise ValueError("angle grids require dimension 2")
         angles = study["evaluation"]["angles_degrees"]
+        if not isinstance(angles, list) or not angles or any(
+            isinstance(a, bool) or not isinstance(a, (int, float)) or not math.isfinite(a) for a in angles
+        ):
+            raise ValueError("angles_degrees must be a nonempty finite numeric list")
+        if len({f"{a:g}" for a in angles}) != len(angles):
+            raise ValueError("angles_degrees must have unique orientation identifiers")
         if 0 not in angles:
             raise ValueError("planar studies need angle 0, the diagonal reference")
-        if int(study["evaluation"]["inits"]) < 1:
-            raise ValueError("planar studies need at least one initial direction")
+        integer_setting(study["evaluation"]["inits"], "evaluation.inits", 1)
     else:
-        if int(study["evaluation"]["rotations"]) < 1 or int(study["evaluation"]["inits_per_rotation"]) < 1:
-            raise ValueError("rotation studies need positive rotation and initialization counts")
+        integer_setting(study["evaluation"]["rotations"], "evaluation.rotations", 1)
+        integer_setting(study["evaluation"]["inits_per_rotation"], "evaluation.inits_per_rotation", 1)
     if study.get("initial_normalization", "loss") not in NORMALIZATIONS:
         raise ValueError("initial_normalization must be 'loss' or 'unit_norm'")
+    scale = study.get("initial_scale", 1.0)
+    if isinstance(scale, bool) or not isinstance(scale, (int, float)) or not math.isfinite(scale) or scale <= 0:
+        raise ValueError("initial_scale must be finite and positive")
+    if "seed_study" in study and (not isinstance(study["seed_study"], str) or not study["seed_study"]):
+        raise ValueError("seed_study must be a nonempty string")
 
 
 def _seed_namespace(study: dict[str, Any]) -> str:
